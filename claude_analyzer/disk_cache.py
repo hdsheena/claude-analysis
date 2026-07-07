@@ -47,52 +47,44 @@ def _ensure_cache():
     conn.close()
 
 
+# Map cache keys to their source directories/patterns for mtime freshness checks
+_SOURCE_MTIME_PATHS = {
+    "claude": [
+        ("~/.claude/projects", "*.jsonl"),
+        ("~/Library/Application Support/Claude/local-agent-mode-sessions", "*.jsonl"),
+    ],
+    "freebuff": [("~/.config/manicode/projects", "chat-messages.json")],
+    "mimo": [("~/.local/share/mimocode/mimocode.db", None)],
+    "opencode": [("~/.local/share/opencode/opencode.db", None)],
+    "antigravity": [("~/.gemini/antigravity/brain", "transcript.jsonl")],
+}
+
+
 def _newest_source_mtime(source: str) -> float:
-    """Return the mtime of the newest source file relevant to the given source."""
+    """Return the mtime of the newest source file for the given source."""
     newest = 0.0
+    patterns = _SOURCE_MTIME_PATHS.get(source, [])
+    # Handle "claude" as "projects" + "local-agent" combined
+    if source == "claude":
+        patterns = _SOURCE_MTIME_PATHS["claude"]
+    elif source == "projects":
+        patterns = _SOURCE_MTIME_PATHS["claude"][:1]
+    elif source == "local-agent":
+        patterns = _SOURCE_MTIME_PATHS["claude"][1:]
 
-    if source in ("claude", "projects"):
-        root = os.path.expanduser("~/.claude/projects")
-        for f in glob.glob(os.path.join(root, "**", "*.jsonl"), recursive=True):
+    for path_tmpl, glob_pattern in patterns:
+        path = os.path.expanduser(path_tmpl)
+        if glob_pattern:
+            for f in glob.glob(os.path.join(path, "**", glob_pattern), recursive=True):
+                try:
+                    newest = max(newest, os.path.getmtime(f))
+                except OSError:
+                    pass
+        else:
             try:
-                newest = max(newest, os.path.getmtime(f))
+                newest = max(newest, os.path.getmtime(path))
             except OSError:
                 pass
-
-    if source in ("claude", "local-agent"):
-        root = os.path.expanduser(
-            "~/Library/Application Support/Claude/local-agent-mode-sessions"
-        )
-        for f in glob.glob(os.path.join(root, "**", "*.jsonl"), recursive=True):
-            try:
-                newest = max(newest, os.path.getmtime(f))
-            except OSError:
-                pass
-
-    if source == "freebuff":
-        fb_dir = os.path.expanduser("~/.config/manicode/projects")
-        for f in glob.glob(
-            os.path.join(fb_dir, "**", "chat-messages.json"), recursive=True
-        ):
-            try:
-                newest = max(newest, os.path.getmtime(f))
-            except OSError:
-                pass
-
-    elif source == "mimo":
-        mimo_db = os.path.expanduser("~/.local/share/mimocode/mimocode.db")
-        try:
-            newest = max(newest, os.path.getmtime(mimo_db))
-        except OSError:
-            pass
-
-    elif source == "opencode":
-        oc_db = os.path.expanduser("~/.local/share/opencode/opencode.db")
-        try:
-            newest = max(newest, os.path.getmtime(oc_db))
-        except OSError:
-            pass
-
     return newest
 
 

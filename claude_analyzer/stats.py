@@ -117,6 +117,21 @@ class AggStats:
     project_models: dict = field(default_factory=dict)
 
 
+def _compute_model_costs(model_tokens_in, model_tokens_out, model_cache_read, model_cache_write):
+    """Compute estimated cost per model from token counts."""
+    model_cost_map = {}
+    for model in set(list(model_tokens_in.keys()) + list(model_tokens_out.keys())):
+        price = _price_for(model)
+        cost = sum(_token_cost(t, price[k]) for k, t in [
+            ("input", model_tokens_in.get(model, 0)),
+            ("output", model_tokens_out.get(model, 0)),
+            ("cache_read", model_cache_read.get(model, 0)),
+            ("cache_write", model_cache_write.get(model, 0)),
+        ])
+        model_cost_map[model] = round(cost, 2)
+    return {k: v for k, v in sorted(model_cost_map.items(), key=lambda x: -x[1])}
+
+
 def compute_stats(sessions: list) -> AggStats:
     """Compute all statistics from a list of parsed Session objects."""
     stats = AggStats()
@@ -124,6 +139,8 @@ def compute_stats(sessions: list) -> AggStats:
 
     model_tokens_in = defaultdict(int)
     model_tokens_out = defaultdict(int)
+    model_cache_read = defaultdict(int)
+    model_cache_write = defaultdict(int)
     project_token_map = defaultdict(int)
     project_size_map = defaultdict(int)
     project_session_map = defaultdict(list)
@@ -134,17 +151,14 @@ def compute_stats(sessions: list) -> AggStats:
         stats.total_messages += len(sess.messages)
         stats.session_lengths.append(len(sess.messages))
 
-        # Count by source
         if sess.source == "projects":
             stats.projects_source_count += 1
         else:
             stats.local_agent_count += 1
 
-        # Count by project
         stats.projects[sess.project] += 1
         project_session_map[sess.project].append(sess.session_id)
 
-        # File size
         try:
             fsize = os.path.getsize(sess.filepath)
             stats.total_size_mb += fsize / (1024 * 1024)
@@ -160,6 +174,8 @@ def compute_stats(sessions: list) -> AggStats:
                     stats.model_counts[msg.model] += 1
                     model_tokens_in[msg.model] += msg.input_tokens
                     model_tokens_out[msg.model] += msg.output_tokens
+                    model_cache_read[msg.model] += msg.cache_read_tokens
+                    model_cache_write[msg.model] += msg.cache_create_tokens
                     project_model_map[sess.project][msg.model] += 1
 
                 stats.stop_reasons[msg.stop_reason or "?"] += 1
@@ -172,7 +188,6 @@ def compute_stats(sessions: list) -> AggStats:
                 for tool in msg.tools_used:
                     stats.tool_counts[tool] += 1
 
-                # Cost estimation
                 price = _price_for(msg.model or "")
                 stats.estimated_cost += _token_cost(msg.input_tokens, price["input"])
                 stats.estimated_cost += _token_cost(msg.output_tokens, price["output"])
@@ -181,32 +196,12 @@ def compute_stats(sessions: list) -> AggStats:
 
     stats.model_input_tokens = dict(model_tokens_in)
     stats.model_output_tokens = dict(model_tokens_out)
-    # Compute cost per model (including cache costs)
-    model_cost_map = {}
-    # Track cache tokens per model too
-    model_cache_read = defaultdict(int)
-    model_cache_write = defaultdict(int)
-    # Build model cache maps from the message loop
-    for sess in sessions:
-        for msg in sess.messages:
-            if msg.msg_type == "assistant" and msg.model:
-                model_cache_read[msg.model] += msg.cache_read_tokens
-                model_cache_write[msg.model] += msg.cache_create_tokens
-    for model in set(list(model_tokens_in.keys()) + list(model_tokens_out.keys())):
-        price = _price_for(model)
-        cost_in = _token_cost(model_tokens_in.get(model, 0), price["input"])
-        cost_out = _token_cost(model_tokens_out.get(model, 0), price["output"])
-        cost_cr = _token_cost(model_cache_read.get(model, 0), price["cache_read"])
-        cost_cw = _token_cost(model_cache_write.get(model, 0), price["cache_write"])
-        model_cost_map[model] = round(cost_in + cost_out + cost_cr + cost_cw, 2)
-    stats.model_costs = {k: v for k, v in sorted(model_cost_map.items(), key=lambda x: -x[1])}
-
+    stats.model_costs = _compute_model_costs(model_tokens_in, model_tokens_out, model_cache_read, model_cache_write)
     stats.project_tokens = dict(project_token_map)
     stats.project_size = dict(project_size_map)
     stats.project_sessions = dict(project_session_map)
     stats.project_models = {k: dict(v) for k, v in project_model_map.items()}
 
-    # Cache hit ratio
     total_context = stats.total_input_tokens + stats.total_cache_read + stats.total_cache_create
     if total_context > 0:
         stats.cache_hit_ratio = stats.total_cache_read / total_context * 100
