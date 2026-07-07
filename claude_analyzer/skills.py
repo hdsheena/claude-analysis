@@ -183,17 +183,17 @@ def recommendations() -> str:
 
     # Check if CLAUDE.md references skills
     claude_md = os.path.expanduser("~/.claude/CLAUDE.md")
+    has_skill_refs = False
     if os.path.exists(claude_md):
         with open(claude_md) as f:
             claude_content = f.read()
-        # Check for skill references using common Claude Code patterns
-    has_skill_refs = any(
-        s in claude_content or f'@skill:{s}' in claude_content or f'@skill-{s}' in claude_content
-        for s in skill_names
-    )
-        if not has_skill_refs and skill_names:
-            lines.append(f"\n  ⚠ CLAUDE.md doesn't reference any installed skills.")
-            lines.append(f"  Consider adding skill references to CLAUDE.md for automatic loading.")
+        has_skill_refs = any(
+            s in claude_content or f'@skill:{s}' in claude_content or f'@skill-{s}' in claude_content
+            for s in skill_names
+        )
+    if not has_skill_refs and skill_names:
+        lines.append(f"\n  ⚠ CLAUDE.md doesn't reference any installed skills.")
+        lines.append(f"  Consider adding skill references to CLAUDE.md for automatic loading.")
 
     # Plugin insights
     plugins_path = os.path.join(PLUGINS_DIR, "marketplaces")
