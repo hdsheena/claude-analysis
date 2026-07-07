@@ -2,16 +2,24 @@
 """Claude Code session analysis tool.
 
 Usage:
-    python3 analyze.py              # Full summary report
-    python3 analyze.py --projects   # Per-project breakdown
-    python3 analyze.py --models     # Model usage details
-    python3 analyze.py --tools      # Tool usage breakdown
-    python3 analyze.py --sessions   # List top 20 sessions
-    python3 analyze.py --sessions 50  # List top 50 sessions
-    python3 analyze.py --project inventory  # Filter by project
-    python3 analyze.py --source projects    # Only projects/ data
-    python3 analyze.py --json              # JSON output
-    python3 analyze.py --all               # Everything
+    python3 analyze.py                    # Full summary report
+    python3 analyze.py --projects         # Per-project breakdown
+    python3 analyze.py --models           # Model usage details
+    python3 analyze.py --tools            # Tool usage breakdown
+    python3 analyze.py --sessions         # List top 20 sessions
+    python3 analyze.py --sessions 50      # List top 50 sessions
+    python3 analyze.py --project evc      # Filter by project
+    python3 analyze.py --source projects  # Only projects/ data
+    python3 analyze.py --json             # JSON output
+    python3 analyze.py --all              # Everything
+    python3 analyze.py --timeline         # Time-series with sparklines
+    python3 analyze.py --timeline weekly  # Weekly bucketed sparklines
+    python3 analyze.py --diff session_a session_b  # Compare two sessions
+    python3 analyze.py --diff --project-a evc --project-b ia  # Compare projects
+    python3 analyze.py --memory           # Memory file analysis
+    python3 analyze.py --memory-inventory # Full memory file listing
+    python3 analyze.py --skills           # Skills analysis
+    python3 analyze.py --plugins          # Plugins analysis
 """
 
 import argparse
@@ -72,27 +80,109 @@ def main():
         action="store_true",
         help="Output as JSON instead of text",
     )
+    # Time-series
+    parser.add_argument(
+        "--timeline",
+        nargs="?",
+        const="daily",
+        choices=["daily", "weekly", "monthly"],
+        help="Show time-series with sparklines (daily, weekly, or monthly)",
+    )
+    # Diff
+    parser.add_argument(
+        "--diff",
+        nargs="*",
+        metavar=("A", "B"),
+        help="Compare two sessions or projects side by side (use with --project-a/--project-b for projects)",
+    )
+    parser.add_argument(
+        "--project-a",
+        type=str,
+        help="First project for --diff comparison",
+    )
+    parser.add_argument(
+        "--project-b",
+        type=str,
+        help="Second project for --diff comparison",
+    )
+    # Memory
+    parser.add_argument(
+        "--memory",
+        action="store_true",
+        help="Analyze memory files across projects",
+    )
+    parser.add_argument(
+        "--memory-inventory",
+        action="store_true",
+        help="Full inventory of all memory files",
+    )
+    # Skills & plugins
+    parser.add_argument(
+        "--skills",
+        action="store_true",
+        help="Analyze installed skills",
+    )
+    parser.add_argument(
+        "--plugins",
+        action="store_true",
+        help="Analyze installed plugins and marketplaces",
+    )
 
     args = parser.parse_args()
 
-    # If no flags given, default to summary
-    show_summary = not any([
+    # --- Handle memory/skills/plugins (no session parsing needed) ---
+    any_special = args.memory or getattr(args, "memory_inventory", False) or \
+                  args.skills or args.plugins
+
+    if any_special:
+        if args.memory:
+            from claude_analyzer.memory import analyze_memory
+            print(analyze_memory())
+        if getattr(args, "memory_inventory", False):
+            from claude_analyzer.memory import memory_inventory
+            print(memory_inventory())
+        if args.skills:
+            from claude_analyzer.skills import analyze_skills, recommendations
+            print(analyze_skills())
+            print(recommendations())
+        if args.plugins:
+            from claude_analyzer.skills import analyze_plugins
+            print(analyze_plugins())
+
+        # If only special flags, exit early
+        if not any([args.projects, args.models, args.tools,
+                    args.sessions is not None, args.all,
+                    args.timeline is not None, args.diff is not None,
+                    args.json]):
+            return
+
+    # Determine what to show
+    no_session_flags = not any([
         args.projects, args.models, args.tools,
         args.sessions is not None, args.all,
-    ]) or args.all
+        args.timeline is not None, args.diff is not None,
+        args.json,
+    ])
+    show_summary = (no_session_flags and not any_special) or args.all
     show_projects = args.projects or args.all
     show_models = args.models or args.all
     show_tools = args.tools or args.all
     show_sessions = args.sessions is not None or args.all
     session_limit = args.sessions if args.sessions is not None else 20
 
-    # Parse all sessions
+    # If only special flags and no session flags, we already exited above
+    if not any([show_summary, show_projects, show_models, show_tools,
+                show_sessions, args.timeline is not None,
+                args.diff is not None, args.json]):
+        return
+
+    # Parse sessions
     print("Parsing session data...", file=sys.stderr)
     sessions = parse_sessions(source=args.source)
     enrich_sessions(sessions)
     print(f"Found {len(sessions)} sessions", file=sys.stderr)
 
-    # Filter by project if requested — recompute stats on filtered set
+    # Filter by project
     if args.project:
         sessions = [
             s for s in sessions
@@ -103,7 +193,33 @@ def main():
 
     stats = compute_stats(sessions)
 
-    # JSON output
+    # --- Diff mode ---
+    if args.diff is not None and len(args.diff) >= 2:
+        from claude_analyzer.diff import diff_sessions, diff_projects
+        a_id, b_id = args.diff[0], args.diff[1]
+
+        if args.project_a and args.project_b:
+            print(diff_projects(sessions, args.project_a, args.project_b))
+        else:
+            # Try as session IDs first
+            sess_a = next((s for s in sessions if s.session_id.startswith(a_id)), None)
+            sess_b = next((s for s in sessions if s.session_id.startswith(b_id)), None)
+            if sess_a and sess_b:
+                print(diff_sessions(sess_a, sess_b))
+            else:
+                # Try as project names
+                print(diff_projects(sessions, a_id, b_id))
+        if not args.all:
+            return
+
+    # --- Timeline mode ---
+    if args.timeline is not None:
+        from claude_analyzer.timeline import timeline_report
+        print(timeline_report(sessions, bucket=args.timeline))
+        if not args.all:
+            return
+
+    # --- JSON output ---
     if args.json:
         output = {
             "total_sessions": stats.total_sessions,
@@ -131,16 +247,20 @@ def main():
             "session_lengths": {
                 "min": min(stats.session_lengths) if stats.session_lengths else 0,
                 "max": max(stats.session_lengths) if stats.session_lengths else 0,
-                "median": (sorted(stats.session_lengths)[len(stats.session_lengths)//2]
-                           if stats.session_lengths else 0),
-                "average": (sum(stats.session_lengths) // len(stats.session_lengths)
-                            if stats.session_lengths else 0),
+                "median": (
+                    sorted(stats.session_lengths)[len(stats.session_lengths)//2]
+                    if stats.session_lengths else 0
+                ),
+                "average": (
+                    sum(stats.session_lengths) // len(stats.session_lengths)
+                    if stats.session_lengths else 0
+                ),
             },
         }
         print(json.dumps(output, indent=2))
         return
 
-    # Text output
+    # --- Text output ---
     if show_summary:
         print(summary(stats))
 

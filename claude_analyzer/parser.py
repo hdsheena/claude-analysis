@@ -103,7 +103,7 @@ def _find_jsonl_files(root: str) -> list:
     return glob.glob(os.path.join(root, "**", "*.jsonl"), recursive=True)
 
 
-def _project_from_path(filepath: str, source: str) -> str:
+def project_name_from_path(filepath: str, source: str) -> str:
     """Extract a human-readable project name from the filepath."""
     parts = filepath.replace(os.path.expanduser("~"), "").split(os.sep)
     # ~/.claude/projects/-Users-m4mbp-GitHub-evc/uuid.jsonl  ->  evc
@@ -144,7 +144,7 @@ def parse_sessions(source: str = "all") -> list:
         jsonl_files = _find_jsonl_files(src_dir)
         for filepath in jsonl_files:
             session_id = os.path.splitext(os.path.basename(filepath))[0]
-            project = _project_from_path(filepath, src_label)
+            project = project_name_from_path(filepath, src_label)
 
             sess = Session(
                 session_id=session_id,
