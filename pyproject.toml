@@ -1,0 +1,27 @@
+[build-system]
+requires = ["setuptools>=68"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "claude-analysis"
+version = "0.1.0"
+description = "Analyze Claude Code session history for insights and usage patterns"
+readme = "README.md"
+requires-python = ">=3.9"
+license = {text = "MIT"}
+authors = [{name = "m4mbp"}]
+keywords = ["claude", "claude-code", "analytics", "session-analysis"]
+classifiers = [
+    "Development Status :: 3 - Alpha",
+    "Environment :: Console",
+    "Intended Audience :: Developers",
+    "License :: OSI Approved :: MIT License",
+    "Programming Language :: Python :: 3",
+    "Topic :: Software Development",
+]
+
+[project.scripts]
+claude-analyze = "analyze:main"
+
+[tool.setuptools.packages.find]
+include = ["claude_analyzer*"]
