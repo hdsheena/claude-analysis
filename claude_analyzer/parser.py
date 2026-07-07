@@ -377,9 +377,7 @@ def parse_mimo_sessions() -> list:
                 (sid,),
             ).fetchall()
 
-            # Build message ID lookup for parts
             msg_ids = [m["id"] for m in msg_rows]
-            msg_index = {m["id"]: i for i, m in enumerate(msg_rows)}
 
             # Load parts and group by message_id
             parts_by_msg = defaultdict(list)
@@ -575,7 +573,6 @@ def parse_opencode_sessions() -> list:
                     first.cache_create_tokens = pre_cache_write
                 else:
                     # No assistant messages — create a synthetic one for stats
-                    placeholder = assistant_msgs[-1] if assistant_msgs else sess.messages[-1]
                     msg = Message(msg_type="assistant")
                     msg.model = srow["model"] or ""
                     msg.input_tokens = pre_input
