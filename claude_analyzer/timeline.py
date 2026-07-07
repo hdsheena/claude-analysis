@@ -30,9 +30,10 @@ def _day_key(ts: float) -> str:
 
 
 def _week_key(ts: float) -> str:
-    """Convert epoch seconds to YYYY-Www."""
+    """Convert epoch seconds to YYYY-MM-DD (Monday of that week)."""
     dt = datetime.fromtimestamp(ts)
-    return dt.strftime("%Y-W%U")
+    mon = dt - timedelta(days=dt.weekday())
+    return mon.strftime("%Y-%m-%d")
 
 
 def _month_key(ts: float) -> str:
@@ -56,6 +57,8 @@ def compute_timeline(sessions: list, bucket: str = "daily") -> dict:
     buckets = defaultdict(lambda: {
         "tokens": 0, "sessions": set(), "messages": 0,
         "models": defaultdict(int), "cost": 0.0,
+        "cache_read": 0, "cache_write": 0,
+        "tokens_by_source": defaultdict(int),
     })
 
     registry = {}
@@ -72,17 +75,18 @@ def compute_timeline(sessions: list, bucket: str = "daily") -> dict:
     from .stats import _price_for, _token_cost
 
     for sess in sessions:
-        # Find timestamp from registry or first message
+        # Find timestamp from registry, then session-level, then first message
         ts = registry.get(sess.session_id)
-        if ts is None and sess.messages:
-            # Try to get timestamp from first message
-            for msg in sess.messages:
-                # We don't have raw timestamps in Message objects yet —
-                # use session-level approximation
-                pass
+        if ts is None:
+            ts = _parse_ts(sess.started_at)
 
         if ts is None:
             continue
+
+        # Group source for display: projects & local-agent → claude
+        display_source = sess.source
+        if display_source in ("projects", "local-agent"):
+            display_source = "claude"
 
         key = key_fn(ts)
         bucket_data = buckets[key]
@@ -90,10 +94,14 @@ def compute_timeline(sessions: list, bucket: str = "daily") -> dict:
 
         for msg in sess.messages:
             if msg.msg_type == "assistant":
-                bucket_data["tokens"] += msg.input_tokens + msg.output_tokens
+                msg_tokens = msg.input_tokens + msg.output_tokens
+                bucket_data["tokens"] += msg_tokens
+                bucket_data["tokens_by_source"][display_source] += msg_tokens
                 bucket_data["messages"] += 1
                 if msg.model:
                     bucket_data["models"][msg.model] += 1
+                bucket_data["cache_read"] += msg.cache_read_tokens
+                bucket_data["cache_write"] += msg.cache_create_tokens
                 price = _price_for(msg.model or "")
                 bucket_data["cost"] += _token_cost(msg.input_tokens, price["input"])
                 bucket_data["cost"] += _token_cost(msg.output_tokens, price["output"])
@@ -102,11 +110,23 @@ def compute_timeline(sessions: list, bucket: str = "daily") -> dict:
 
     # Sort and build output
     sorted_keys = sorted(buckets.keys())
+
+    # Build per-source token lists
+    all_sources = set()
+    for k in sorted_keys:
+        all_sources.update(buckets[k]["tokens_by_source"].keys())
+    tokens_by_source = {}
+    for src in sorted(all_sources):
+        tokens_by_source[src] = [buckets[k]["tokens_by_source"].get(src, 0) for k in sorted_keys]
+
     return {
         "dates": sorted_keys,
         "tokens": [buckets[k]["tokens"] for k in sorted_keys],
+        "tokens_by_source": tokens_by_source,
         "sessions": [len(buckets[k]["sessions"]) for k in sorted_keys],
         "cost": [round(buckets[k]["cost"], 2) for k in sorted_keys],
+        "cache_read": [buckets[k]["cache_read"] for k in sorted_keys],
+        "cache_write": [buckets[k]["cache_write"] for k in sorted_keys],
         "top_models": _top_models_over_time(buckets, sorted_keys),
         "bucket": bucket,
     }

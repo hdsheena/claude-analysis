@@ -10,22 +10,57 @@ from .parser import Session, Message
 # Approximate pricing per 1M tokens (USD), as of mid-2026
 # These are rough estimates; actual costs depend on plan/tier
 PRICING = {
+    # Claude models
     "claude-sonnet-4-6": {"input": 3.0, "output": 15.0, "cache_read": 0.30, "cache_write": 3.75},
     "claude-sonnet-5": {"input": 3.0, "output": 15.0, "cache_read": 0.30, "cache_write": 3.75},
     "claude-haiku-4-5-20251001": {"input": 0.80, "output": 4.0, "cache_read": 0.08, "cache_write": 1.0},
     "claude-opus-4-8": {"input": 15.0, "output": 75.0, "cache_read": 1.50, "cache_write": 18.75},
+    "claude-opus-4-7": {"input": 15.0, "output": 75.0, "cache_read": 1.50, "cache_write": 18.75},
     "claude-fable-5": {"input": 1.0, "output": 5.0, "cache_read": 0.10, "cache_write": 1.25},
     "claude-sonnet-4": {"input": 3.0, "output": 15.0, "cache_read": 0.30, "cache_write": 3.75},
     "claude-sonnet-4-20250514": {"input": 3.0, "output": 15.0, "cache_read": 0.30, "cache_write": 3.75},
     "claude-haiku-4-5": {"input": 0.80, "output": 4.0, "cache_read": 0.08, "cache_write": 1.0},
+    # Non-Claude models
+    "gpt-5": {"input": 2.50, "output": 10.0, "cache_read": 0.25, "cache_write": 2.50},
+    "minimax-m3:cloud": {"input": 1.20, "output": 4.80, "cache_read": 0.0, "cache_write": 0.0},
+    "mimo-v2-flash": {"input": 0.15, "output": 0.60, "cache_read": 0.0, "cache_write": 0.0},
+    "mimo-v2.5-pro": {"input": 0.43, "output": 1.70, "cache_read": 0.0, "cache_write": 0.0},
+    "mimo-v2.5-free": {"input": 0.0, "output": 0.0, "cache_read": 0.0, "cache_write": 0.0},
 }
+
+# Models known to be free — zero-cost pricing
+FREE_MODELS = {
+    "mimo-v2.5-free", "deepseek-v4-flash-free",
+    "llama3.2:3b", "gemma4:latest", "qwen3-4b-base",
+    "qwen3-4b-base:latest",
+    "big-pickle",  # free on OpenCode Zen
+    "unknown",     # unlabeled model
+    "<synthetic>", # synthetic/test messages
+    "mimo-auto",   # Mimo auto model router
+}
+
+# Routing / triage models — effectively zero cost
+# Tuple passed to str.startswith() which accepts a tuple of prefixes
+FREE_PREFIXES = ("triage-", "smarterrouter")
+
+ZERO_PRICE = {"input": 0.0, "output": 0.0, "cache_read": 0.0, "cache_write": 0.0}
 DEFAULT_PRICE = {"input": 3.0, "output": 15.0, "cache_read": 0.30, "cache_write": 3.75}
 
 
 def _price_for(model: str) -> dict:
-    """Get pricing for a model, using prefix matching."""
+    """Get pricing for a model, checking free list and prefix matching."""
+    if not model:
+        return DEFAULT_PRICE
+    # Exact match in pricing table
     if model in PRICING:
         return PRICING[model]
+    # Known free models
+    if model in FREE_MODELS:
+        return ZERO_PRICE
+    # Free-by-prefix (routers, triage models)
+    if model.startswith(FREE_PREFIXES):
+        return ZERO_PRICE
+    # Prefix match in pricing table
     for prefix, price in sorted(PRICING.items(), key=lambda x: -len(x[0])):
         if model.startswith(prefix):
             return price
@@ -73,6 +108,7 @@ class AggStats:
     # Model-specific token breakdown
     model_input_tokens: dict = field(default_factory=dict)
     model_output_tokens: dict = field(default_factory=dict)
+    model_costs: dict = field(default_factory=dict)  # model -> estimated cost in USD
 
     # Cache metrics
     cache_hit_ratio: float = 0.0
@@ -145,6 +181,26 @@ def compute_stats(sessions: list) -> AggStats:
 
     stats.model_input_tokens = dict(model_tokens_in)
     stats.model_output_tokens = dict(model_tokens_out)
+    # Compute cost per model (including cache costs)
+    model_cost_map = {}
+    # Track cache tokens per model too
+    model_cache_read = defaultdict(int)
+    model_cache_write = defaultdict(int)
+    # Build model cache maps from the message loop
+    for sess in sessions:
+        for msg in sess.messages:
+            if msg.msg_type == "assistant" and msg.model:
+                model_cache_read[msg.model] += msg.cache_read_tokens
+                model_cache_write[msg.model] += msg.cache_create_tokens
+    for model in set(list(model_tokens_in.keys()) + list(model_tokens_out.keys())):
+        price = _price_for(model)
+        cost_in = _token_cost(model_tokens_in.get(model, 0), price["input"])
+        cost_out = _token_cost(model_tokens_out.get(model, 0), price["output"])
+        cost_cr = _token_cost(model_cache_read.get(model, 0), price["cache_read"])
+        cost_cw = _token_cost(model_cache_write.get(model, 0), price["cache_write"])
+        model_cost_map[model] = round(cost_in + cost_out + cost_cr + cost_cw, 2)
+    stats.model_costs = {k: v for k, v in sorted(model_cost_map.items(), key=lambda x: -x[1])}
+
     stats.project_tokens = dict(project_token_map)
     stats.project_size = dict(project_size_map)
     stats.project_sessions = dict(project_session_map)

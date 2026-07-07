@@ -20,6 +20,9 @@ Usage:
     python3 analyze.py --memory-inventory # Full memory file listing
     python3 analyze.py --skills           # Skills analysis
     python3 analyze.py --plugins          # Plugins analysis
+    python3 analyze.py --search-tool "trello_create_card"  # Search tool calls
+    python3 analyze.py --search-card "Order recommendations"  # Find Trello card
+    python3 analyze.py --card-context <session_id> <msg_idx>  # Show conversation
 """
 
 import argparse
@@ -39,7 +42,7 @@ def main():
     )
     parser.add_argument(
         "--source",
-        choices=["all", "projects", "local-agent"],
+        choices=["all", "claude", "freebuff", "mimo", "opencode"],
         default="all",
         help="Which session source to analyze (default: all)",
     )
@@ -127,6 +130,25 @@ def main():
         action="store_true",
         help="Analyze installed plugins and marketplaces",
     )
+    # Search
+    parser.add_argument(
+        "--search-tool",
+        type=str,
+        metavar="QUERY",
+        help="Search tool_use calls by name, input, or user message",
+    )
+    parser.add_argument(
+        "--search-card",
+        type=str,
+        metavar="CARD_NAME",
+        help="Find sessions where a Trello card was created/updated",
+    )
+    parser.add_argument(
+        "--card-context",
+        nargs=2,
+        metavar=("SESSION_ID", "MSG_IDX"),
+        help="Show conversation context around a specific tool call",
+    )
 
     args = parser.parse_args()
 
@@ -176,20 +198,65 @@ def main():
                 args.diff is not None, args.json]):
         return
 
-    # Parse sessions
-    print("Parsing session data...", file=sys.stderr)
-    sessions = parse_sessions(source=args.source)
-    enrich_sessions(sessions)
-    print(f"Found {len(sessions)} sessions", file=sys.stderr)
+    # --- Search modes (need sessions but different output) ---
+    any_search = args.search_tool or args.search_card or args.card_context
 
-    # Filter by project
-    if args.project:
-        sessions = [
-            s for s in sessions
-            if args.project.lower() in s.project.lower()
-        ]
-        print(f"Filtered to {len(sessions)} sessions matching '{args.project}'",
-              file=sys.stderr)
+    # Parse sessions (needed for search, stats, or normal output)
+    needs_sessions = any_search or any([show_summary, show_projects, show_models,
+                                         show_tools, show_sessions,
+                                         args.timeline is not None,
+                                         args.diff is not None, args.json,
+                                         args.all])
+
+    if not needs_sessions and not any_special:
+        parser.print_help()
+        return
+
+    if needs_sessions:
+        print("Parsing session data...", file=sys.stderr)
+        sessions = parse_sessions(source=args.source)
+        enrich_sessions(sessions)
+        print(f"Found {len(sessions)} sessions", file=sys.stderr)
+
+        if args.project:
+            sessions = [
+                s for s in sessions
+                if args.project.lower() in s.project.lower()
+            ]
+            print(f"Filtered to {len(sessions)} matching '{args.project}'",
+                  file=sys.stderr)
+
+    # --- Search modes ---
+    if any_search:
+        from claude_analyzer.search import (
+            build_tool_index, search_tool_calls, search_report,
+            find_sessions_by_card, card_report, get_conversation_context,
+        )
+
+        if args.card_context:
+            sid, idx_str = args.card_context
+            ctx = get_conversation_context(sessions, sid, int(idx_str))
+            if ctx:
+                sess = ctx["session"]
+                print(f"\n┌─ CONTEXT: [{sess.project}] {sid[:20]}... ─┐")
+                print(f"  First msg: {(sess.first_user_msg or '')[:200]}")
+                for m in ctx["messages"]:
+                    marker = " >>>" if m["idx"] == ctx["highlighted_idx"] else "   "
+                    role_icon = "👤" if m["role"] == "user" else "🤖"
+                    print(f"{marker} {role_icon} [{m['type']}] {m['text'][:300]}")
+                    if m["tools"]:
+                        print(f"       🛠️  {', '.join(m['tools'][:8])}")
+            else:
+                print(f"Session {sid} not found.")
+            return
+
+        index = build_tool_index(sessions)
+
+        if args.search_card:
+            print(card_report(index, args.search_card))
+        elif args.search_tool:
+            print(search_report(index, args.search_tool))
+        return
 
     stats = compute_stats(sessions)
 
