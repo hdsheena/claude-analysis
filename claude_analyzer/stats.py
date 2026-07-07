@@ -209,6 +209,50 @@ def compute_stats(sessions: list) -> AggStats:
     return stats
 
 
+def aggregate_message_stats(messages: list) -> dict:
+    """Extract model, tool, token, and stop-reason stats from a message list.
+
+    Returns a dict with:
+        models (Counter), tools (Counter), stop_reasons (Counter),
+        total_input_tokens, total_output_tokens, total_cache_read, total_cache_write
+
+    Shared entry point used by both stats.py and diff.py to avoid duplicating
+    the message-aggregation loop.
+    """
+    from collections import Counter
+
+    models = Counter()
+    tools = Counter()
+    stop_reasons = Counter()
+    t_in = 0
+    t_out = 0
+    t_cache_r = 0
+    t_cache_w = 0
+
+    for msg in messages:
+        if msg.msg_type != "assistant":
+            continue
+        if msg.model:
+            models[msg.model] += 1
+        t_in += msg.input_tokens
+        t_out += msg.output_tokens
+        t_cache_r += msg.cache_read_tokens
+        t_cache_w += msg.cache_create_tokens
+        stop_reasons[msg.stop_reason or "?"] += 1
+        for tool in msg.tools_used:
+            tools[tool] += 1
+
+    return {
+        "models": models,
+        "tools": tools,
+        "stop_reasons": stop_reasons,
+        "total_input_tokens": t_in,
+        "total_output_tokens": t_out,
+        "total_cache_read": t_cache_r,
+        "total_cache_write": t_cache_w,
+    }
+
+
 def format_number(n: int) -> str:
     """Format large numbers with commas."""
     return f"{n:,}"

@@ -1,4 +1,4 @@
-"""Skills and plugins analyzer for .claude directory."""
+"""Skills, plugins, and repo configuration analyzer for .claude directory."""
 
 import os
 import glob
@@ -7,6 +7,82 @@ from collections import defaultdict
 
 SKILLS_DIR = os.path.expanduser("~/.claude/skills")
 PLUGINS_DIR = os.path.expanduser("~/.claude/plugins")
+
+
+# ═══════════════════════════════════════════════════════════════════════════════
+# Repo-level tool configuration scanning
+# Used by both CLI (--skills) and Streamlit (Memory_Skills page)
+# ═══════════════════════════════════════════════════════════════════════════════
+
+TOOL_CONFIG_DIRS = {
+    ".claude": "Claude Code",
+    ".mimocode": "Mimo",
+    ".commandcode": "CommandCode",
+    ".opencode": "OpenCode",
+}
+
+
+def scan_repo_tool_dirs() -> dict:
+    """Scan GitHub repos for per-project tool configuration directories.
+
+    Returns dict keyed by directory name (e.g. ".claude") with a list of
+    paths to each repo's config directory.
+    """
+    repo_roots = [
+        os.path.expanduser("~/GitHub"),
+        os.path.expanduser("~/Documents/GitHub"),
+        os.path.expanduser("~/orca/workspaces"),
+    ]
+    result = {name: [] for name in TOOL_CONFIG_DIRS}
+    for root in repo_roots:
+        if not os.path.isdir(root):
+            continue
+        depth = 2 if "orca" in root else 1
+        for tool_dir_name in TOOL_CONFIG_DIRS:
+            pattern = os.path.join(root, *(["*"] * depth), tool_dir_name)
+            result[tool_dir_name].extend(glob.glob(pattern))
+    for name in result:
+        result[name] = sorted(set(result[name]))
+    return result
+
+
+def categorize_repo_files(repo_dir: str) -> dict:
+    """Walk a repo's tool config directory and categorize files by type.
+
+    Returns a dict with keys: skills, plans, commands, settings, memory,
+    hooks, agents, taste, config, other. Each maps to a list of relative paths.
+    """
+    categories = {"skills": [], "plans": [], "commands": [], "settings": [],
+                  "memory": [], "hooks": [], "agents": [], "taste": [],
+                  "config": [], "other": []}
+
+    for walk_root, walk_dirs, walk_files in os.walk(repo_dir):
+        walk_dirs[:] = [wd for wd in walk_dirs if wd != "node_modules"]
+        rel = os.path.relpath(walk_root, repo_dir)
+        for fname in walk_files:
+            relpath = os.path.join(rel, fname) if rel != "." else fname
+            if "skills" in rel.split(os.sep) or fname.endswith("SKILL.md"):
+                categories["skills"].append(relpath)
+            elif "plans" in rel.split(os.sep) and fname.endswith(".md"):
+                categories["plans"].append(relpath)
+            elif "command" in rel.lower() or "commands" in rel.split(os.sep):
+                categories["commands"].append(relpath)
+            elif fname.endswith(".json") and "setting" in fname.lower():
+                categories["settings"].append(relpath)
+            elif "memory" in rel.split(os.sep) and fname.endswith(".md"):
+                categories["memory"].append(relpath)
+            elif "hooks" in rel.split(os.sep):
+                categories["hooks"].append(relpath)
+            elif "agents" in rel.split(os.sep) or "agent" in rel.split(os.sep):
+                categories["agents"].append(relpath)
+            elif "taste" in rel.split(os.sep):
+                categories["taste"].append(relpath)
+            elif fname == "package.json":
+                categories["config"].append(relpath)
+            else:
+                categories["other"].append(relpath)
+
+    return categories
 
 
 def _read_file_head(path: str, lines: int = 8) -> str:

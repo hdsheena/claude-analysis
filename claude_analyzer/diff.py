@@ -1,73 +1,47 @@
 """Side-by-side comparison of sessions or projects."""
 
-from collections import Counter, defaultdict
+from collections import defaultdict
 
 from .parser import Session
-from .stats import format_number, format_tokens, format_bytes
+from .stats import format_number, format_tokens, format_bytes, aggregate_message_stats
 
 
 def _session_stats(session: Session) -> dict:
     """Extract key stats from a single session."""
-    models = Counter()
-    tools = Counter()
-    total_input = 0
-    total_output = 0
-    total_cache = 0
-    stop_reasons = Counter()
-
-    for msg in session.messages:
-        if msg.msg_type == "assistant":
-            if msg.model:
-                models[msg.model] += 1
-            total_input += msg.input_tokens
-            total_output += msg.output_tokens
-            total_cache += msg.cache_read_tokens
-            stop_reasons[msg.stop_reason or "?"] += 1
-            for tool in msg.tools_used:
-                tools[tool] += 1
+    agg = aggregate_message_stats(session.messages)
 
     return {
         "id": session.session_id[:12],
         "project": session.project,
         "messages": len(session.messages),
         "lines": session.line_count,
-        "input_tokens": total_input,
-        "output_tokens": total_output,
-        "cache_read": total_cache,
-        "models": dict(models.most_common(5)),
-        "tools": dict(tools.most_common(10)),
-        "stop_reasons": dict(stop_reasons),
+        "input_tokens": agg["total_input_tokens"],
+        "output_tokens": agg["total_output_tokens"],
+        "cache_read": agg["total_cache_read"],
+        "models": dict(agg["models"].most_common(5)),
+        "tools": dict(agg["tools"].most_common(10)),
+        "stop_reasons": dict(agg["stop_reasons"]),
         "first_msg": (session.first_user_msg or "")[:80],
     }
 
 
 def _aggregate_stats(sessions: list, label: str) -> dict:
     """Aggregate stats across multiple sessions."""
+    all_messages = [msg for s in sessions for msg in s.messages]
+    agg = aggregate_message_stats(all_messages)
+
     base = {
         "label": label,
         "sessions": len(sessions),
         "messages": sum(len(s.messages) for s in sessions),
         "lines": sum(s.line_count for s in sessions),
-        "input_tokens": sum(s.total_input_tokens for s in sessions),
-        "output_tokens": sum(s.total_output_tokens for s in sessions),
-        "cache_read": sum(s.total_cache_read for s in sessions),
+        "input_tokens": agg["total_input_tokens"],
+        "output_tokens": agg["total_output_tokens"],
+        "cache_read": agg["total_cache_read"],
+        "models": dict(agg["models"].most_common(8)),
+        "tools": dict(agg["tools"].most_common(10)),
+        "stop_reasons": dict(agg["stop_reasons"]),
     }
-
-    models = Counter()
-    tools = Counter()
-    stop_reasons = Counter()
-    for s in sessions:
-        for msg in s.messages:
-            if msg.msg_type == "assistant":
-                if msg.model:
-                    models[msg.model] += 1
-                stop_reasons[msg.stop_reason or "?"] += 1
-                for tool in msg.tools_used:
-                    tools[tool] += 1
-
-    base["models"] = dict(models.most_common(8))
-    base["tools"] = dict(tools.most_common(10))
-    base["stop_reasons"] = dict(stop_reasons)
     return base
 
 

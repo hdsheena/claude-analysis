@@ -17,6 +17,7 @@ import plotly.express as px
 from collections import defaultdict
 
 from claude_analyzer.memory import collect_memory_file_data
+from claude_analyzer.skills import scan_repo_tool_dirs, categorize_repo_files, TOOL_CONFIG_DIRS
 from shared import render_sidebar
 
 
@@ -344,39 +345,11 @@ def _render_data_sources_tab():
         st.caption("(Could not count sessions)")
 
 
-def _categorize_repo_files(repo_dir: str) -> dict:
-    """Walk a repo's tool config directory and categorize files."""
-    categories = {"skills": [], "plans": [], "commands": [], "settings": [],
-                  "memory": [], "hooks": [], "agents": [], "taste": [],
-                  "config": [], "other": []}
+# categorize_repo_files and scan_repo_tool_dirs are now in claude_analyzer.skills
 
-    for walk_root, walk_dirs, walk_files in os.walk(repo_dir):
-        walk_dirs[:] = [wd for wd in walk_dirs if wd != "node_modules"]
-        rel = os.path.relpath(walk_root, repo_dir)
-        for fname in walk_files:
-            relpath = os.path.join(rel, fname) if rel != "." else fname
-            if "skills" in rel.split(os.sep) or fname.endswith("SKILL.md"):
-                categories["skills"].append(relpath)
-            elif "plans" in rel.split(os.sep) and fname.endswith(".md"):
-                categories["plans"].append(relpath)
-            elif "command" in rel.lower() or "commands" in rel.split(os.sep):
-                categories["commands"].append(relpath)
-            elif fname.endswith(".json") and "setting" in fname.lower():
-                categories["settings"].append(relpath)
-            elif "memory" in rel.split(os.sep) and fname.endswith(".md"):
-                categories["memory"].append(relpath)
-            elif "hooks" in rel.split(os.sep):
-                categories["hooks"].append(relpath)
-            elif "agents" in rel.split(os.sep) or "agent" in rel.split(os.sep):
-                categories["agents"].append(relpath)
-            elif "taste" in rel.split(os.sep):
-                categories["taste"].append(relpath)
-            elif fname == "package.json":
-                categories["config"].append(relpath)
-            else:
-                categories["other"].append(relpath)
 
-    return categories
+
+# categorize_repo_files and scan_repo_tool_dirs are in claude_analyzer.skills
 
 
 def _display_repo_files(tool_contents: dict, repo_dirs: list):
@@ -438,47 +411,32 @@ def _render_repo_configs_tab():
     st.subheader("🗂️ Repo-Level Tool Configurations")
     st.caption("Scans repos for per-project configuration from Claude Code, Mimo, CommandCode, and OpenCode.")
 
-    TOOLS = {
-        ".claude": {"emoji": "🧠", "label": "Claude Code"},
-        ".mimocode": {"emoji": "🤖", "label": "Mimo"},
-        ".commandcode": {"emoji": "⌨️", "label": "CommandCode"},
-        ".opencode": {"emoji": "🔓", "label": "OpenCode"},
-    }
-
     @st.cache_data(ttl=86400, show_spinner="Scanning repo configs...")
-    def _scan_repo_tool_dirs():
-        repo_roots = [
-            os.path.expanduser("~/GitHub"),
-            os.path.expanduser("~/Documents/GitHub"),
-            os.path.expanduser("~/orca/workspaces"),
-        ]
-        result = {name: [] for name in TOOLS}
-        for root in repo_roots:
-            if not os.path.isdir(root):
-                continue
-            depth = 2 if "orca" in root else 1
-            for tool_dir_name in TOOLS:
-                pattern = os.path.join(root, *(["*"] * depth), tool_dir_name)
-                result[tool_dir_name].extend(glob.glob(pattern))
-        for name in result:
-            result[name] = sorted(set(result[name]))
-        return result
+    def _cached_scan():
+        return scan_repo_tool_dirs()
 
-    all_tool_dirs = _scan_repo_tool_dirs()
+    all_tool_dirs = _cached_scan()
     total_dirs = sum(len(v) for v in all_tool_dirs.values())
 
     if total_dirs == 0:
         st.info("No repo-level tool configuration directories found.")
         return
 
-    cols = st.columns(len(TOOLS))
-    for i, (tool_dir_name, tool_info) in enumerate(TOOLS.items()):
+    TOOL_DISPLAY = {
+        ".claude": {"emoji": "🧠", "label": "Claude Code"},
+        ".mimocode": {"emoji": "🤖", "label": "Mimo"},
+        ".commandcode": {"emoji": "⌨️", "label": "CommandCode"},
+        ".opencode": {"emoji": "🔓", "label": "OpenCode"},
+    }
+
+    cols = st.columns(len(TOOL_DISPLAY))
+    for i, (tool_dir_name, tool_info) in enumerate(TOOL_DISPLAY.items()):
         with cols[i]:
             st.metric(f"{tool_info['emoji']} {tool_info['label']}", f"{len(all_tool_dirs[tool_dir_name])} repos")
 
     st.divider()
 
-    for tool_dir_name, tool_info in TOOLS.items():
+    for tool_dir_name, tool_info in TOOL_DISPLAY.items():
         dirs = all_tool_dirs[tool_dir_name]
         if not dirs:
             continue
@@ -488,7 +446,7 @@ def _render_repo_configs_tab():
             tool_contents = {}
             for d in dirs:
                 repo_name = os.path.basename(os.path.dirname(d))
-                tool_contents[repo_name] = _categorize_repo_files(d)
+                tool_contents[repo_name] = categorize_repo_files(d)
 
             _display_repo_files(tool_contents, dirs)
 
