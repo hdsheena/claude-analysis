@@ -285,6 +285,7 @@ def render_sidebar():
         st.page_link("pages/3_Sessions.py", label="🔍 Sessions & Raw Data", icon="💬")
         st.page_link("pages/4_Compare.py", label="⚖️ Compare", icon="🔀")
         st.page_link("pages/5_Memory_Skills.py", label="📝 Memory & Skills", icon="🔧")
+        st.page_link("pages/6_Antigravity.py", label="🧠 Antigravity", icon="💭")
 
         st.divider()
         st.caption("Claude Analyzer v0.1.0")

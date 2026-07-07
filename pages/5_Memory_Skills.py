@@ -21,31 +21,18 @@ from claude_analyzer.parser import project_name_from_path
 from shared import render_sidebar
 
 
-st.title("📝 Memory, Skills & Plugins")
-
-# ── Sidebar & filters ────────────────────────────────────────────────────────
-
-_, _, _ = render_sidebar()  # sidebar handles filters, this page doesn't use them
-
-# ── Tabs ─────────────────────────────────────────────────────────────────────
-
-tab_memory, tab_skills, tab_plugins, tab_repo, tab_sources = st.tabs(
-    ["📝 Memory Files", "🔧 Skills", "🔌 Plugins", "🗂️ Repo Configs", "📂 Data Sources"]
-)
-
 # ═══════════════════════════════════════════════════════════════════════════════
-# MEMORY TAB
+# Tab render functions
 # ═══════════════════════════════════════════════════════════════════════════════
 
-with tab_memory:
+def _render_memory_tab():
+    """Scan and display memory files across projects."""
     st.subheader("📝 Memory File Analysis")
 
-    # Find memory files: central ~/.claude + repo-level .claude dirs
     memory_patterns = [
         os.path.expanduser("~/.claude/projects/**/memory/*.md"),
         os.path.expanduser("~/.claude/projects/**/MEMORY.md"),
     ]
-    # Also scan repo-level .claude dirs for memory files
     repo_roots = [
         os.path.expanduser("~/GitHub"),
         os.path.expanduser("~/Documents/GitHub"),
@@ -56,366 +43,294 @@ with tab_memory:
             memory_patterns.append(os.path.join(root, "*", ".claude", "MEMORY.md"))
 
     memory_files = sorted(
-        set(
-            f
-            for pattern in memory_patterns
-            for f in glob.glob(pattern, recursive=True)
-        )
+        set(f for pattern in memory_patterns
+            for f in glob.glob(pattern, recursive=True))
     )
 
     if not memory_files:
         st.info("No memory files found.")
-    else:
-        file_data = []
-        for fp in memory_files:
-            fname = os.path.basename(fp)
-            # Derive project name: try the Claude path format first, then repo-level
-            proj = project_name_from_path(fp, "projects")
-            if proj in ("unknown", "local-agent"):
-                # Repo-level file: extract repo name from path
-                parts = fp.split(os.sep)
-                try:
-                    github_idx = max(
-                        i for i, p in enumerate(parts)
-                        if p in ("GitHub", "workspaces")
-                    )
-                    if github_idx + 1 < len(parts):
-                        proj = parts[github_idx + 1]
-                except ValueError:
-                    pass
-            size = os.path.getsize(fp)
+        return
+
+    file_data = []
+    for fp in memory_files:
+        fname = os.path.basename(fp)
+        proj = project_name_from_path(fp, "projects")
+        if proj in ("unknown", "local-agent"):
+            parts = fp.split(os.sep)
             try:
-                h = hashlib.md5(open(fp, "rb").read()).hexdigest()
-            except Exception:
-                h = "?"
+                github_idx = max(i for i, p in enumerate(parts) if p in ("GitHub", "workspaces"))
+                if github_idx + 1 < len(parts):
+                    proj = parts[github_idx + 1]
+            except ValueError:
+                pass
+        size = os.path.getsize(fp)
+        try:
+            h = hashlib.md5(open(fp, "rb").read()).hexdigest()
+        except Exception:
+            h = "?"
 
-            name_lower = fname.lower().replace(".md", "")
-            if name_lower.startswith("feedback_"):
-                cat = "feedback"
-            elif name_lower.startswith("project_"):
-                cat = "project"
-            elif name_lower.startswith("reference_"):
-                cat = "reference"
-            elif name_lower == "memory":
-                cat = "index"
-            elif name_lower in ("stakeholders", "user_identity", "dev_environment"):
-                cat = "meta"
-            else:
-                cat = "other"
+        name_lower = fname.lower().replace(".md", "")
+        if name_lower.startswith("feedback_"):
+            cat = "feedback"
+        elif name_lower.startswith("project_"):
+            cat = "project"
+        elif name_lower.startswith("reference_"):
+            cat = "reference"
+        elif name_lower == "memory":
+            cat = "index"
+        elif name_lower in ("stakeholders", "user_identity", "dev_environment"):
+            cat = "meta"
+        else:
+            cat = "other"
 
-            try:
-                header = (
-                    open(fp, encoding="utf-8", errors="replace")
-                    .readline()
-                    .strip()
-                )
-            except Exception:
-                header = "(unreadable)"
+        try:
+            header = open(fp, encoding="utf-8", errors="replace").readline().strip()
+        except Exception:
+            header = "(unreadable)"
 
-            file_data.append({
-                "Name": fname,
-                "Project": proj,
-                "Category": cat,
-                "Size": size,
-                "Hash": h,
-                "Header": header,
-                "Path": fp,
-            })
-
-        df_mem = pd.DataFrame(file_data)
-        unique_hashes = df_mem["Hash"].nunique()
-        dup_count = len(df_mem) - unique_hashes
-
-        c1, c2, c3, c4 = st.columns(4)
-        with c1:
-            st.metric("Total Files", len(df_mem))
-        with c2:
-            st.metric("Unique (by content)", unique_hashes)
-        with c3:
-            st.metric("Duplicates", dup_count)
-        with c4:
-            total_bytes = sum(r["Size"] for r in file_data)
-            st.metric("Total Size", f"{total_bytes:,} bytes")
-
-        st.subheader("By Category")
-        cats = df_mem["Category"].value_counts()
-        df_cats = pd.DataFrame({
-            "Category": cats.index,
-            "Count": cats.values,
-            "Size": [
-                df_mem[df_mem["Category"] == cat]["Size"].sum()
-                for cat in cats.index
-            ],
+        file_data.append({
+            "Name": fname, "Project": proj, "Category": cat,
+            "Size": size, "Hash": h, "Header": header, "Path": fp,
         })
 
-        col_a, col_b = st.columns(2)
-        with col_a:
-            fig = px.pie(df_cats, names="Category", values="Count", hole=0.4)
-            fig.update_layout(
-                height=300, margin=dict(l=0, r=0, t=0, b=0),
-                paper_bgcolor="rgba(0,0,0,0)",
-            )
-            st.plotly_chart(fig, use_container_width=True)
-        with col_b:
-            proj_counts = df_mem["Project"].value_counts().head(15)
-            df_proj_mem = pd.DataFrame({
-                "Project": proj_counts.index, "Files": proj_counts.values,
-            })
-            fig = px.bar(
-                df_proj_mem, x="Files", y="Project", orientation="h",
-                color_discrete_sequence=["#636efa"],
-            )
-            fig.update_layout(
-                height=400, margin=dict(l=0, r=0, t=0, b=0),
-                paper_bgcolor="rgba(0,0,0,0)", plot_bgcolor="rgba(0,0,0,0)",
-                yaxis=dict(autorange="reversed"),
-            )
-            st.plotly_chart(fig, use_container_width=True)
+    df_mem = pd.DataFrame(file_data)
+    unique_hashes = df_mem["Hash"].nunique()
+    dup_count = len(df_mem) - unique_hashes
 
+    c1, c2, c3, c4 = st.columns(4)
+    with c1: st.metric("Total Files", len(df_mem))
+    with c2: st.metric("Unique (by content)", unique_hashes)
+    with c3: st.metric("Duplicates", dup_count)
+    with c4:
+        total_bytes = sum(r["Size"] for r in file_data)
+        st.metric("Total Size", f"{total_bytes:,} bytes")
+
+    st.subheader("By Category")
+    cats = df_mem["Category"].value_counts()
+    df_cats = pd.DataFrame({
+        "Category": cats.index, "Count": cats.values,
+        "Size": [df_mem[df_mem["Category"] == cat]["Size"].sum() for cat in cats.index],
+    })
+
+    col_a, col_b = st.columns(2)
+    with col_a:
+        fig = px.pie(df_cats, names="Category", values="Count", hole=0.4)
+        fig.update_layout(height=300, margin=dict(l=0, r=0, t=0, b=0),
+                          paper_bgcolor="rgba(0,0,0,0)")
+        st.plotly_chart(fig, use_container_width=True)
+    with col_b:
+        proj_counts = df_mem["Project"].value_counts().head(15)
+        df_proj_mem = pd.DataFrame({"Project": proj_counts.index, "Files": proj_counts.values})
+        fig = px.bar(df_proj_mem, x="Files", y="Project", orientation="h",
+                     color_discrete_sequence=["#636efa"])
+        fig.update_layout(height=400, margin=dict(l=0, r=0, t=0, b=0),
+                          paper_bgcolor="rgba(0,0,0,0)", plot_bgcolor="rgba(0,0,0,0)",
+                          yaxis=dict(autorange="reversed"))
+        st.plotly_chart(fig, use_container_width=True)
+
+    st.divider()
+    st.subheader("📋 Full Inventory")
+    st.dataframe(
+        df_mem[["Name", "Project", "Category", "Size", "Header"]],
+        use_container_width=True, hide_index=True,
+        column_config={
+            "Name": st.column_config.TextColumn("File"),
+            "Project": st.column_config.TextColumn("Project"),
+            "Category": st.column_config.TextColumn("Category"),
+            "Size": st.column_config.NumberColumn("Size (bytes)", format=","),
+            "Header": st.column_config.TextColumn("First Line", width="large"),
+        },
+    )
+
+    if dup_count > 0:
         st.divider()
-        st.subheader("📋 Full Inventory")
+        st.subheader("🔁 Duplicate Files (identical content)")
+        hash_groups = defaultdict(list)
+        for _, row in df_mem.iterrows():
+            hash_groups[row["Hash"]].append(row)
+        for h, group in hash_groups.items():
+            if len(group) > 1:
+                names = ", ".join(f"{r['Project']}/{r['Name']}" for r in group)
+                st.caption(f"**{group[0]['Name']}** — {len(group)} copies: {names}")
+
+
+def _render_skills_tab():
+    """Display installed skills from ~/.claude/skills."""
+    st.subheader("🔧 Installed Skills")
+    skills_dir = os.path.expanduser("~/.claude/skills")
+
+    if not os.path.isdir(skills_dir):
+        st.info("No skills directory found at ~/.claude/skills")
+        return
+
+    items = os.listdir(skills_dir)
+    skill_data = []
+    for item in sorted(items):
+        full = os.path.join(skills_dir, item)
+        is_symlink = os.path.islink(full)
+        is_dir = os.path.isdir(full) and not is_symlink
+        is_file = os.path.isfile(full) and not is_symlink
+
+        entry = {"Name": item, "Type": "directory" if is_dir else "file",
+                 "Symlink": is_symlink, "Size": 0, "Preview": ""}
+        if is_file and item.endswith(".md"):
+            entry["Size"] = os.path.getsize(full)
+            try:
+                with open(full) as f:
+                    content = "".join(f.readline() for _ in range(15))
+                entry["Preview"] = content[:300]
+                for line in content.split("\n"):
+                    if "description" in line.lower() or "when" in line.lower():
+                        entry["Preview"] = line.strip()[:120]
+                        break
+            except Exception:
+                entry["Preview"] = "(unreadable)"
+        if is_symlink:
+            try:
+                entry["Target"] = os.readlink(full)[:80]
+            except Exception:
+                entry["Target"] = "?"
+
+        skill_data.append(entry)
+
+    df_skills = pd.DataFrame(skill_data)
+    custom = [s for s in skill_data if s["Type"] == "file" and not s["Symlink"]]
+    symlinked = [s for s in skill_data if s["Symlink"]]
+    dirs = [s for s in skill_data if s["Type"] == "directory" and not s["Symlink"]]
+
+    c1, c2, c3, c4 = st.columns(4)
+    with c1: st.metric("Total Entries", len(skill_data))
+    with c2: st.metric("Custom Skills", len(custom))
+    with c3: st.metric("Symlinked (built-in)", len(symlinked))
+    with c4: st.metric("Subdirectories", len(dirs))
+
+    if custom:
+        st.subheader("📝 Custom Skills")
         st.dataframe(
-            df_mem[["Name", "Project", "Category", "Size", "Header"]],
+            pd.DataFrame(custom)[["Name", "Size", "Preview"]],
             use_container_width=True, hide_index=True,
             column_config={
                 "Name": st.column_config.TextColumn("File"),
-                "Project": st.column_config.TextColumn("Project"),
-                "Category": st.column_config.TextColumn("Category"),
                 "Size": st.column_config.NumberColumn("Size (bytes)", format=","),
-                "Header": st.column_config.TextColumn("First Line", width="large"),
+                "Preview": st.column_config.TextColumn("Description", width="large"),
             },
         )
+    if symlinked:
+        st.subheader("🔗 Built-in Skills (symlinks)")
+        st.dataframe(
+            pd.DataFrame(symlinked)[["Name", "Target"]],
+            use_container_width=True, hide_index=True,
+            column_config={
+                "Name": st.column_config.TextColumn("Skill"),
+                "Target": st.column_config.TextColumn("Target Path", width="large"),
+            },
+        )
+    if dirs:
+        st.subheader("📁 Skill Directories")
+        for d in dirs:
+            sub_path = os.path.join(skills_dir, d["Name"])
+            sub_items = os.listdir(sub_path) if os.path.isdir(sub_path) else []
+            st.caption(f"**{d['Name']}/** — {len(sub_items)} items")
 
-        if dup_count > 0:
-            st.divider()
-            st.subheader("🔁 Duplicate Files (identical content)")
-            hash_groups = defaultdict(list)
-            for _, row in df_mem.iterrows():
-                hash_groups[row["Hash"]].append(row)
-            for h, group in hash_groups.items():
-                if len(group) > 1:
-                    names = ", ".join(
-                        f"{r['Project']}/{r['Name']}" for r in group
-                    )
-                    st.caption(
-                        f"**{group[0]['Name']}** — {len(group)} copies: {names}"
-                    )
 
-# ═══════════════════════════════════════════════════════════════════════════════
-# SKILLS TAB
-# ═══════════════════════════════════════════════════════════════════════════════
-
-with tab_skills:
-    st.subheader("🔧 Installed Skills")
-
-    skills_dir = os.path.expanduser("~/.claude/skills")
-    if not os.path.isdir(skills_dir):
-        st.info("No skills directory found at ~/.claude/skills")
-    else:
-        items = os.listdir(skills_dir)
-        skill_data = []
-        for item in sorted(items):
-            full = os.path.join(skills_dir, item)
-            is_symlink = os.path.islink(full)
-            is_dir = os.path.isdir(full) and not is_symlink
-            is_file = os.path.isfile(full) and not is_symlink
-
-            entry = {
-                "Name": item,
-                "Type": "directory" if is_dir else "file",
-                "Symlink": is_symlink, "Size": 0, "Preview": "",
-            }
-            if is_file and item.endswith(".md"):
-                entry["Size"] = os.path.getsize(full)
-                try:
-                    with open(full) as f:
-                        content = "".join(f.readline() for _ in range(15))
-                    entry["Preview"] = content[:300]
-                    for line in content.split("\n"):
-                        if "description" in line.lower() or "when" in line.lower():
-                            entry["Preview"] = line.strip()[:120]
-                            break
-                except Exception:
-                    entry["Preview"] = "(unreadable)"
-            if is_symlink:
-                try:
-                    entry["Target"] = os.readlink(full)[:80]
-                except Exception:
-                    entry["Target"] = "?"
-
-            skill_data.append(entry)
-
-        df_skills = pd.DataFrame(skill_data)
-        custom = [s for s in skill_data if s["Type"] == "file" and not s["Symlink"]]
-        symlinked = [s for s in skill_data if s["Symlink"]]
-        dirs = [s for s in skill_data if s["Type"] == "directory" and not s["Symlink"]]
-
-        c1, c2, c3, c4 = st.columns(4)
-        with c1: st.metric("Total Entries", len(skill_data))
-        with c2: st.metric("Custom Skills", len(custom))
-        with c3: st.metric("Symlinked (built-in)", len(symlinked))
-        with c4: st.metric("Subdirectories", len(dirs))
-
-        if custom:
-            st.subheader("📝 Custom Skills")
-            st.dataframe(
-                pd.DataFrame(custom)[["Name", "Size", "Preview"]],
-                use_container_width=True, hide_index=True,
-                column_config={
-                    "Name": st.column_config.TextColumn("File"),
-                    "Size": st.column_config.NumberColumn("Size (bytes)", format=","),
-                    "Preview": st.column_config.TextColumn("Description", width="large"),
-                },
-            )
-        if symlinked:
-            st.subheader("🔗 Built-in Skills (symlinks)")
-            st.dataframe(
-                pd.DataFrame(symlinked)[["Name", "Target"]],
-                use_container_width=True, hide_index=True,
-                column_config={
-                    "Name": st.column_config.TextColumn("Skill"),
-                    "Target": st.column_config.TextColumn("Target Path", width="large"),
-                },
-            )
-        if dirs:
-            st.subheader("📁 Skill Directories")
-            for d in dirs:
-                sub_path = os.path.join(skills_dir, d["Name"])
-                sub_items = os.listdir(sub_path) if os.path.isdir(sub_path) else []
-                st.caption(f"**{d['Name']}/** — {len(sub_items)} items")
-
-# ═══════════════════════════════════════════════════════════════════════════════
-# PLUGINS TAB
-# ═══════════════════════════════════════════════════════════════════════════════
-
-with tab_plugins:
+def _render_plugins_tab():
+    """Display installed plugins and marketplaces from ~/.claude/plugins."""
     st.subheader("🔌 Installed Plugins & Marketplaces")
     plugins_dir = os.path.expanduser("~/.claude/plugins")
+
     if not os.path.isdir(plugins_dir):
         st.info("No plugins directory found at ~/.claude/plugins")
+        return
+
+    st.caption("**Configuration files:**")
+    for cfg in ["known_marketplaces.json", "blocklist.json"]:
+        path = os.path.join(plugins_dir, cfg)
+        if os.path.exists(path):
+            try:
+                with open(path) as f:
+                    data = json.load(f)
+                if isinstance(data, list):
+                    st.caption(f"  • **{cfg}**: {len(data)} entries")
+                elif isinstance(data, dict):
+                    st.caption(f"  • **{cfg}**: {len(data)} keys")
+            except Exception:
+                st.caption(f"  • **{cfg}**: (parse error)")
+
+    marketplaces_dir = os.path.join(plugins_dir, "marketplaces")
+    if os.path.isdir(marketplaces_dir):
+        st.divider()
+        st.subheader("🏪 Marketplaces")
+        for mp in sorted(os.listdir(marketplaces_dir)):
+            mp_path = os.path.join(marketplaces_dir, mp)
+            if os.path.isdir(mp_path):
+                plugins_path = os.path.join(mp_path, "plugins")
+                external_path = os.path.join(mp_path, "external_plugins")
+                plugin_count = len(os.listdir(plugins_path)) if os.path.isdir(plugins_path) else 0
+                ext_count = len(os.listdir(external_path)) if os.path.isdir(external_path) else 0
+                with st.expander(
+                    f"**{mp}** — {plugin_count} plugins, {ext_count} external",
+                    expanded=plugin_count + ext_count < 20,
+                ):
+                    if os.path.isdir(plugins_path):
+                        st.caption("Plugins:")
+                        for plugin in sorted(os.listdir(plugins_path))[:10]:
+                            st.caption(f"  • {plugin}")
+                        if plugin_count > 10:
+                            st.caption(f"  ... and {plugin_count - 10} more")
+                    if os.path.isdir(external_path) and ext_count > 0:
+                        st.caption("External:")
+                        for plugin in sorted(os.listdir(external_path))[:5]:
+                            st.caption(f"  • {plugin}")
+                        if ext_count > 5:
+                            st.caption(f"  ... and {ext_count - 5} more")
+
+    manifests = glob.glob(os.path.join(plugins_dir, "**", "manifest.json"), recursive=True)
+    manifests = [m for m in manifests if "marketplaces" not in m]
+    if manifests:
+        st.divider()
+        st.subheader("📦 Installed Plugin Manifests")
+        manifest_data = []
+        for m in manifests[:20]:
+            rel = m.replace(plugins_dir, "").lstrip("/")
+            try:
+                with open(m) as f:
+                    d = json.load(f)
+                manifest_data.append({"Name": d.get("name", "?"), "Version": d.get("version", "?"), "Path": rel})
+            except Exception:
+                manifest_data.append({"Name": "?", "Version": "?", "Path": rel})
+        st.dataframe(pd.DataFrame(manifest_data), use_container_width=True, hide_index=True)
     else:
-        st.caption("**Configuration files:**")
-        for cfg in ["known_marketplaces.json", "blocklist.json"]:
-            path = os.path.join(plugins_dir, cfg)
-            if os.path.exists(path):
-                try:
-                    with open(path) as f:
-                        data = json.load(f)
-                    if isinstance(data, list):
-                        st.caption(f"  • **{cfg}**: {len(data)} entries")
-                    elif isinstance(data, dict):
-                        st.caption(f"  • **{cfg}**: {len(data)} keys")
-                except Exception:
-                    st.caption(f"  • **{cfg}**: (parse error)")
+        st.caption("No installed plugin manifests found.")
 
-        marketplaces_dir = os.path.join(plugins_dir, "marketplaces")
-        if os.path.isdir(marketplaces_dir):
-            st.divider()
-            st.subheader("🏪 Marketplaces")
-            for mp in sorted(os.listdir(marketplaces_dir)):
-                mp_path = os.path.join(marketplaces_dir, mp)
-                if os.path.isdir(mp_path):
-                    plugins_path = os.path.join(mp_path, "plugins")
-                    external_path = os.path.join(mp_path, "external_plugins")
-                    plugin_count = (
-                        len(os.listdir(plugins_path))
-                        if os.path.isdir(plugins_path) else 0
-                    )
-                    ext_count = (
-                        len(os.listdir(external_path))
-                        if os.path.isdir(external_path) else 0
-                    )
-                    with st.expander(
-                        f"**{mp}** — {plugin_count} plugins, {ext_count} external",
-                        expanded=plugin_count + ext_count < 20,
-                    ):
-                        if os.path.isdir(plugins_path):
-                            st.caption("Plugins:")
-                            for plugin in sorted(os.listdir(plugins_path))[:10]:
-                                st.caption(f"  • {plugin}")
-                            if plugin_count > 10:
-                                st.caption(f"  ... and {plugin_count - 10} more")
-                        if os.path.isdir(external_path) and ext_count > 0:
-                            st.caption("External:")
-                            for plugin in sorted(os.listdir(external_path))[:5]:
-                                st.caption(f"  • {plugin}")
-                            if ext_count > 5:
-                                st.caption(f"  ... and {ext_count - 5} more")
 
-        manifests = glob.glob(
-            os.path.join(plugins_dir, "**", "manifest.json"), recursive=True
-        )
-        manifests = [m for m in manifests if "marketplaces" not in m]
-        if manifests:
-            st.divider()
-            st.subheader("📦 Installed Plugin Manifests")
-            manifest_data = []
-            for m in manifests[:20]:
-                rel = m.replace(plugins_dir, "").lstrip("/")
-                try:
-                    with open(m) as f:
-                        d = json.load(f)
-                    manifest_data.append({
-                        "Name": d.get("name", "?"),
-                        "Version": d.get("version", "?"), "Path": rel,
-                    })
-                except Exception:
-                    manifest_data.append({"Name": "?", "Version": "?", "Path": rel})
-            st.dataframe(
-                pd.DataFrame(manifest_data),
-                use_container_width=True, hide_index=True,
-            )
-        else:
-            st.caption("No installed plugin manifests found.")
-
-# ═══════════════════════════════════════════════════════════════════════════════
-# DATA SOURCES TAB — shows all session data directories being scanned
-# ═══════════════════════════════════════════════════════════════════════════════
-
-with tab_sources:
+def _render_data_sources_tab():
+    """Show all data source directories and quick session counts."""
     st.subheader("📂 Data Sources")
     st.caption("All directories and files the app scans for session data.")
 
     SOURCES = [
-        {
-            "name": "Claude Code",
-            "source_key": "claude",
-            "paths": [
-                os.path.expanduser("~/.claude/projects"),
-                os.path.expanduser("~/Library/Application Support/Claude/local-agent-mode-sessions"),
-            ],
-            "type": "JSONL files",
-            "pattern": "**/*.jsonl",
-        },
-        {
-            "name": "Freebuff / Codebuff",
-            "source_key": "freebuff",
-            "paths": [os.path.expanduser("~/.config/manicode/projects")],
-            "type": "JSON files",
-            "pattern": "*/chats/*/chat-messages.json",
-        },
-        {
-            "name": "Mimo",
-            "source_key": "mimo",
-            "paths": [os.path.expanduser("~/.local/share/mimocode/mimocode.db")],
-            "type": "SQLite database",
-            "pattern": None,
-        },
-        {
-            "name": "Opencode",
-            "source_key": "opencode",
-            "paths": [os.path.expanduser("~/.local/share/opencode/opencode.db")],
-            "type": "SQLite database",
-            "pattern": None,
-        },
+        {"name": "Claude Code", "source_key": "claude",
+         "paths": [os.path.expanduser("~/.claude/projects"),
+                   os.path.expanduser("~/Library/Application Support/Claude/local-agent-mode-sessions")],
+         "type": "JSONL files", "pattern": "**/*.jsonl"},
+        {"name": "Freebuff / Codebuff", "source_key": "freebuff",
+         "paths": [os.path.expanduser("~/.config/manicode/projects")],
+         "type": "JSON files", "pattern": "*/chats/*/chat-messages.json"},
+        {"name": "Mimo", "source_key": "mimo",
+         "paths": [os.path.expanduser("~/.local/share/mimocode/mimocode.db")],
+         "type": "SQLite database", "pattern": None},
+        {"name": "Opencode", "source_key": "opencode",
+         "paths": [os.path.expanduser("~/.local/share/opencode/opencode.db")],
+         "type": "SQLite database", "pattern": None},
+        {"name": "Antigravity", "source_key": "antigravity",
+         "paths": [os.path.expanduser("~/.gemini/antigravity/brain")],
+         "type": "transcript.jsonl files", "pattern": ".system_generated/logs/transcript.jsonl"},
     ]
 
-    rows = []
     for src in SOURCES:
         all_paths = []
         file_count = 0
         status = "✅"
-
         for p in src["paths"]:
             if os.path.exists(p):
                 all_paths.append(p)
@@ -431,53 +346,31 @@ with tab_sources:
                 status = "⚠️ missing"
                 all_paths.append(f"{p} (not found)")
 
-        rows.append({
-            "Source": src["name"],
-            "Type": src["type"],
-            "Status": status,
-            "Files / Size": file_count if file_count else "—",
-            "Path": "\n".join(all_paths),
-        })
-
-    # Show as a clean table
-    for row in rows:
         with st.container(border=True):
             c1, c2, c3 = st.columns([2, 1, 5])
             with c1:
-                st.caption(f"### {row['Status']} {row['Source']}")
-                st.caption(f"{row['Type']} · {row['Files / Size']} entries")
-            with c2:
-                pass
+                st.caption(f"### {status} {src['name']}")
+                st.caption(f"{src['type']} · {file_count} entries")
             with c3:
-                path_lines = row["Path"].split("\n")
-                for pl in path_lines:
+                for pl in all_paths:
                     st.code(pl, language=None)
 
     st.divider()
 
-    # Quick session counts by scanning source directories (no full parse)
     @st.cache_data(ttl=86400, show_spinner="Counting sessions...")
     def _count_sessions_by_source():
         counts = {}
-        # Claude projects: count JSONL files
-        for d in [
-            os.path.expanduser("~/.claude/projects"),
-            os.path.expanduser("~/Library/Application Support/Claude/local-agent-mode-sessions"),
-        ]:
+        for d in [os.path.expanduser("~/.claude/projects"),
+                  os.path.expanduser("~/Library/Application Support/Claude/local-agent-mode-sessions")]:
             if os.path.isdir(d):
-                counts["projects" if "projects" in d else "local-agent"] = \
-                    len(glob.glob(os.path.join(d, "**", "*.jsonl"), recursive=True))
-        # Freebuff: count chat-messages.json
+                key = "projects" if "projects" in d else "local-agent"
+                counts[key] = len(glob.glob(os.path.join(d, "**", "*.jsonl"), recursive=True))
         fb = os.path.expanduser("~/.config/manicode/projects")
         if os.path.isdir(fb):
-            counts["freebuff"] = len(glob.glob(
-                os.path.join(fb, "*", "chats", "*", "chat-messages.json")))
-        # Mimo: count sessions in DB
+            counts["freebuff"] = len(glob.glob(os.path.join(fb, "*", "chats", "*", "chat-messages.json")))
         import sqlite3
-        for db_path, key in [
-            (os.path.expanduser("~/.local/share/mimocode/mimocode.db"), "mimo"),
-            (os.path.expanduser("~/.local/share/opencode/opencode.db"), "opencode"),
-        ]:
+        for db_path, key in [(os.path.expanduser("~/.local/share/mimocode/mimocode.db"), "mimo"),
+                             (os.path.expanduser("~/.local/share/opencode/opencode.db"), "opencode")]:
             if os.path.isfile(db_path):
                 try:
                     conn = sqlite3.connect(db_path)
@@ -486,33 +379,30 @@ with tab_sources:
                     conn.close()
                 except Exception:
                     counts[key] = "?"
+        # Antigravity: count transcript files
+        brain_dir = os.path.expanduser("~/.gemini/antigravity/brain")
+        if os.path.isdir(brain_dir):
+            counts["antigravity"] = len(glob.glob(os.path.join(brain_dir, "*", ".system_generated", "logs", "transcript.jsonl")))
         return counts
 
     try:
         counts = _count_sessions_by_source()
-        cols = st.columns(4)
-        sources_order = ["claude", "freebuff", "mimo", "opencode"]
+        cols = st.columns(5)
+        sources_order = ["claude", "freebuff", "mimo", "opencode", "antigravity"]
         for i, src_key in enumerate(sources_order):
             with cols[i]:
                 val = counts.get(src_key, 0)
                 if src_key == "claude":
                     val = counts.get("projects", 0) + counts.get("local-agent", 0)
-                st.metric(
-                    src_key.replace("-", " ").title(),
-                    val,
-                )
+                st.metric(src_key.replace("-", " ").title(), val)
     except Exception:
         st.caption("(Could not count sessions)")
 
-# ═══════════════════════════════════════════════════════════════════════════════
-# REPO CONFIGS TAB — scans .claude, .commandcode, .mimocode, .opencode in repos
-# ═══════════════════════════════════════════════════════════════════════════════
 
-with tab_repo:
+def _render_repo_configs_tab():
+    """Scan repos for .claude, .mimocode, .opencode, .commandcode configs."""
     st.subheader("🗂️ Repo-Level Tool Configurations")
     st.caption("Scans repos for per-project configuration from Claude Code, Mimo, CommandCode, and OpenCode.")
-
-    # ── Tool definitions ──────────────────────────────────────────────────
 
     TOOLS = {
         ".claude": {"emoji": "🧠", "label": "Claude Code"},
@@ -520,8 +410,6 @@ with tab_repo:
         ".commandcode": {"emoji": "⌨️", "label": "CommandCode"},
         ".opencode": {"emoji": "🔓", "label": "OpenCode"},
     }
-
-    # ── Scan repos (cached) ──────────────────────────────────────────────
 
     @st.cache_data(ttl=86400, show_spinner="Scanning repo configs...")
     def _scan_repo_tool_dirs():
@@ -543,140 +431,135 @@ with tab_repo:
         return result
 
     all_tool_dirs = _scan_repo_tool_dirs()
-
     total_dirs = sum(len(v) for v in all_tool_dirs.values())
 
     if total_dirs == 0:
         st.info("No repo-level tool configuration directories found.")
-    else:
-        # ── Summary metrics row ──────────────────────────────────────────
+        return
 
-        cols = st.columns(len(TOOLS))
-        for i, (tool_dir_name, tool_info) in enumerate(TOOLS.items()):
-            count = len(all_tool_dirs[tool_dir_name])
-            with cols[i]:
-                st.metric(
-                    f"{tool_info['emoji']} {tool_info['label']}",
-                    f"{count} repos",
-                )
+    cols = st.columns(len(TOOLS))
+    for i, (tool_dir_name, tool_info) in enumerate(TOOLS.items()):
+        with cols[i]:
+            st.metric(f"{tool_info['emoji']} {tool_info['label']}", f"{len(all_tool_dirs[tool_dir_name])} repos")
 
-        st.divider()
+    st.divider()
 
-        # ── Per-tool expander sections ────────────────────────────────────
+    for tool_dir_name, tool_info in TOOLS.items():
+        dirs = all_tool_dirs[tool_dir_name]
+        if not dirs:
+            continue
 
-        for tool_dir_name, tool_info in TOOLS.items():
-            dirs = all_tool_dirs[tool_dir_name]
-            if not dirs:
-                continue
+        with st.expander(f"{tool_info['emoji']} **{tool_info['label']}** — {len(dirs)} repo(s)",
+                         expanded=len(dirs) <= 4):
+            tool_contents = {}
+            all_files = []
+            total_files = 0
 
-            with st.expander(
-                f"{tool_info['emoji']} **{tool_info['label']}** — {len(dirs)} repo(s)",
-                expanded=len(dirs) <= 4,
-            ):
-                # Scan each repo's tool dir for contents
-                tool_contents = {}
-                all_files = []
-                total_files = 0
+            for d in dirs:
+                repo_name = os.path.basename(os.path.dirname(d))
+                categories = {"skills": [], "plans": [], "commands": [], "settings": [],
+                              "memory": [], "hooks": [], "agents": [], "taste": [],
+                              "config": [], "other": []}
 
-                for d in dirs:
-                    repo_name = os.path.basename(os.path.dirname(d))
-                    categories = {
-                        "skills": [], "plans": [], "commands": [],
-                        "settings": [], "memory": [], "hooks": [],
-                        "agents": [], "taste": [], "config": [], "other": [],
-                    }
+                for walk_root, walk_dirs, walk_files in os.walk(d):
+                    walk_dirs[:] = [wd for wd in walk_dirs if wd != "node_modules"]
+                    rel = os.path.relpath(walk_root, d)
+                    for fname in walk_files:
+                        relpath = os.path.join(rel, fname) if rel != "." else fname
+                        if "skills" in rel.split(os.sep) or fname.endswith("SKILL.md"):
+                            categories["skills"].append(relpath)
+                        elif "plans" in rel.split(os.sep) and fname.endswith(".md"):
+                            categories["plans"].append(relpath)
+                        elif "command" in rel.lower() or "commands" in rel.split(os.sep):
+                            categories["commands"].append(relpath)
+                        elif fname.endswith(".json") and "setting" in fname.lower():
+                            categories["settings"].append(relpath)
+                        elif "memory" in rel.split(os.sep) and fname.endswith(".md"):
+                            categories["memory"].append(relpath)
+                        elif "hooks" in rel.split(os.sep):
+                            categories["hooks"].append(relpath)
+                        elif "agents" in rel.split(os.sep) or "agent" in rel.split(os.sep):
+                            categories["agents"].append(relpath)
+                        elif "taste" in rel.split(os.sep):
+                            categories["taste"].append(relpath)
+                        elif fname == "package.json":
+                            categories["config"].append(relpath)
+                        else:
+                            categories["other"].append(relpath)
 
-                    for walk_root, walk_dirs, walk_files in os.walk(d):
-                        walk_dirs[:] = [
-                            wd for wd in walk_dirs if wd != "node_modules"
-                        ]
-                        rel = os.path.relpath(walk_root, d)
-                        for fname in walk_files:
-                            fpath = os.path.join(walk_root, fname)
-                            relpath = os.path.join(rel, fname) if rel != "." else fname
+                total_files += sum(len(v) for v in categories.values())
+                tool_contents[repo_name] = categories
 
-                            # Categorize
-                            if "skills" in rel.split(os.sep) or fname.endswith("SKILL.md"):
-                                categories["skills"].append(relpath)
-                            elif "plans" in rel.split(os.sep) and fname.endswith(".md"):
-                                categories["plans"].append(relpath)
-                            elif "command" in rel.lower() or "commands" in rel.split(os.sep):
-                                categories["commands"].append(relpath)
-                            elif fname.endswith(".json") and "setting" in fname.lower():
-                                categories["settings"].append(relpath)
-                            elif "memory" in rel.split(os.sep) and fname.endswith(".md"):
-                                categories["memory"].append(relpath)
-                            elif "hooks" in rel.split(os.sep):
-                                categories["hooks"].append(relpath)
-                            elif "agents" in rel.split(os.sep) or "agent" in rel.split(os.sep):
-                                categories["agents"].append(relpath)
-                            elif "taste" in rel.split(os.sep):
-                                categories["taste"].append(relpath)
-                            elif fname == "package.json":
-                                categories["config"].append(relpath)
-                            else:
-                                categories["other"].append(relpath)
+                for cat, files in categories.items():
+                    if cat == "other":
+                        continue
+                    for relpath in files[:5]:
+                        fpath = os.path.join(d, relpath)
+                        try:
+                            header = open(fpath, encoding="utf-8", errors="replace").readline().strip()
+                        except Exception:
+                            header = "(unreadable)"
+                        all_files.append({
+                            "Repo": repo_name, "Tool": tool_info["label"],
+                            "Category": cat, "File": relpath, "Header": header[:120],
+                        })
 
-                    total_files += sum(len(v) for v in categories.values())
-                    tool_contents[repo_name] = categories
+            repo_rows = []
+            for repo_name, cats in tool_contents.items():
+                row = {"Repo": repo_name}
+                for cat in ["skills", "plans", "commands", "settings", "memory",
+                            "hooks", "agents", "taste", "config", "other"]:
+                    count = len(cats.get(cat, []))
+                    if count > 0:
+                        row[cat.capitalize()] = count
+                repo_rows.append(row)
 
-                    # Collect notable files for detail view
-                    for cat, files in categories.items():
-                        if cat == "other":
-                            continue
-                        for relpath in files[:5]:
-                            fpath = os.path.join(d, relpath)
-                            try:
-                                header = (
-                                    open(fpath, encoding="utf-8",
-                                         errors="replace").readline().strip()
-                                )
-                            except Exception:
-                                header = "(unreadable)"
-                            all_files.append({
-                                "Repo": repo_name,
-                                "Tool": tool_info["label"],
-                                "Category": cat,
-                                "File": relpath,
-                                "Header": header[:120],
-                            })
+            st.caption(f"**{total_files} files** across {len(dirs)} repo(s)")
+            st.dataframe(pd.DataFrame(repo_rows), use_container_width=True, hide_index=True)
 
-                # Per-repo summary table
-                repo_rows = []
-                for repo_name, cats in tool_contents.items():
-                    row = {"Repo": repo_name}
-                    for cat in ["skills", "plans", "commands", "settings",
-                                "memory", "hooks", "agents", "taste",
-                                "config", "other"]:
-                        count = len(cats.get(cat, []))
-                        if count > 0:
-                            row[cat.capitalize()] = count
-                    repo_rows.append(row)
+            if all_files:
+                by_cat = defaultdict(list)
+                for f in all_files:
+                    by_cat[f["Category"]].append(f)
+                for cat in ["skills", "plans", "commands", "memory", "taste",
+                            "settings", "hooks", "agents", "config"]:
+                    items = by_cat.get(cat, [])
+                    if items:
+                        st.caption(f"**{cat.capitalize()}** ({len(items)} files)")
+                        st.dataframe(
+                            pd.DataFrame(items)[["Repo", "File", "Header"]],
+                            use_container_width=True, hide_index=True,
+                            column_config={
+                                "Repo": st.column_config.TextColumn("Repo", width="small"),
+                                "File": st.column_config.TextColumn("File"),
+                                "Header": st.column_config.TextColumn("Header", width="large"),
+                            },
+                        )
 
-                st.caption(f"**{total_files} files** across {len(dirs)} repo(s)")
-                st.dataframe(
-                    pd.DataFrame(repo_rows),
-                    use_container_width=True, hide_index=True,
-                )
 
-                # Detail: files by category
-                if all_files:
-                    by_cat = defaultdict(list)
-                    for f in all_files:
-                        by_cat[f["Category"]].append(f)
+# ═══════════════════════════════════════════════════════════════════════════════
+# Page entry point
+# ═══════════════════════════════════════════════════════════════════════════════
 
-                    for cat in ["skills", "plans", "commands", "memory",
-                                "taste", "settings", "hooks", "agents",
-                                "config"]:
-                        items = by_cat.get(cat, [])
-                        if items:
-                            st.caption(f"**{cat.capitalize()}** ({len(items)} files)")
-                            st.dataframe(
-                                pd.DataFrame(items)[["Repo", "File", "Header"]],
-                                use_container_width=True, hide_index=True,
-                                column_config={
-                                    "Repo": st.column_config.TextColumn("Repo", width="small"),
-                                    "File": st.column_config.TextColumn("File"),
-                                    "Header": st.column_config.TextColumn("Header", width="large"),
-                                },
-                            )
+st.title("📝 Memory, Skills & Plugins")
+
+_, _, _ = render_sidebar()
+
+tab_memory, tab_skills, tab_plugins, tab_repo, tab_sources = st.tabs(
+    ["📝 Memory Files", "🔧 Skills", "🔌 Plugins", "🗂️ Repo Configs", "📂 Data Sources"]
+)
+
+with tab_memory:
+    _render_memory_tab()
+
+with tab_skills:
+    _render_skills_tab()
+
+with tab_plugins:
+    _render_plugins_tab()
+
+with tab_sources:
+    _render_data_sources_tab()
+
+with tab_repo:
+    _render_repo_configs_tab()
