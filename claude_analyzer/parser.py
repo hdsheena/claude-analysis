@@ -112,6 +112,24 @@ def parse_message(line: str) -> Optional[Message]:
     return msg
 
 
+def _parse_parts(parts: list) -> tuple:
+    """Parse Mimo/Opencode parts into (tools_list, parsed_parts)."""
+    tools = []
+    parsed_parts = []
+    for p in parts:
+        if p is None:
+            continue
+        try:
+            pdata = json.loads(p) if isinstance(p, str) else (p or {})
+        except (json.JSONDecodeError, TypeError):
+            continue
+        if isinstance(pdata, dict):
+            parsed_parts.append(pdata)
+            if pdata.get("type") == "tool":
+                tools.append(pdata.get("tool", "?"))
+    return tools, parsed_parts
+
+
 def _parse_iso_to_epoch(ts_str: str) -> Optional[int]:
     """Parse an ISO 8601 timestamp string to epoch seconds."""
     if not ts_str:
@@ -401,43 +419,17 @@ def parse_mimo_sessions() -> list:
                         msg.cache_read_tokens = cache.get("read", 0) or 0
                         msg.cache_write_tokens = cache.get("write", 0) or 0
 
-                # Parts: extract content, tools
+                # Parts: extract tools and stash for chat view
                 parts = parts_by_msg.get(mrow["id"], [])
-                tools = []
-                for part_str in parts:
-                    try:
-                        pdata = json.loads(part_str) if isinstance(part_str, str) else (part_str or {})
-                    except json.JSONDecodeError:
-                        continue
-                    ptype = pdata.get("type", "")
-                    if ptype == "tool":
-                        tool_name = pdata.get("tool", "?")
-                        tools.append(tool_name)
-
+                tools, parsed_parts = _parse_parts(parts)
                 msg.tools_used = tools
-
-                # Stash text parts into _raw for chat view compatibility
-                parsed_parts = []
-                for p in parts:
-                    if p is None:
-                        continue
-                    try:
-                        parsed = json.loads(p) if isinstance(p, str) else p
-                        if isinstance(parsed, dict):
-                            parsed_parts.append(parsed)
-                    except (json.JSONDecodeError, TypeError):
-                        pass
                 msg._raw["_parts"] = parsed_parts
 
                 sess.messages.append(msg)
 
-                # Capture first user message
+                # Capture first user message from text parts
                 if role == "user" and sess.first_user_msg is None:
-                    for part_str in parts:
-                        try:
-                            pdata = json.loads(part_str) if isinstance(part_str, str) else (part_str or {})
-                        except json.JSONDecodeError:
-                            continue
+                    for pdata in parsed_parts:
                         if pdata.get("type") == "text":
                             sess.first_user_msg = (pdata.get("text", "") or "")[:300]
                             break
@@ -557,43 +549,17 @@ def parse_opencode_sessions() -> list:
                     msg.cache_create_tokens = tok.get("cache_write", 0) or 0
                     tokens_assigned += msg.input_tokens + msg.output_tokens
 
-                # Parts: extract tools
+                # Parts: extract tools and stash for chat view
                 parts = parts_by_msg.get(mrow["id"], [])
-                tools = []
-                for part_str in parts:
-                    try:
-                        pdata = json.loads(part_str) if isinstance(part_str, str) else (part_str or {})
-                    except json.JSONDecodeError:
-                        continue
-                    ptype = pdata.get("type", "")
-                    if ptype == "tool":
-                        tool_name = pdata.get("tool", "?")
-                        tools.append(tool_name)
-
+                tools, parsed_parts = _parse_parts(parts)
                 msg.tools_used = tools
-
-                # Stash text parts into _raw for chat view compatibility
-                parsed_parts = []
-                for p in parts:
-                    if p is None:
-                        continue
-                    try:
-                        parsed = json.loads(p) if isinstance(p, str) else p
-                        if isinstance(parsed, dict):
-                            parsed_parts.append(parsed)
-                    except (json.JSONDecodeError, TypeError):
-                        pass
                 msg._raw["_parts"] = parsed_parts
 
                 sess.messages.append(msg)
 
-                # Capture first user message
+                # Capture first user message from text parts
                 if role == "user" and sess.first_user_msg is None:
-                    for part_str in parts:
-                        try:
-                            pdata = json.loads(part_str) if isinstance(part_str, str) else (part_str or {})
-                        except json.JSONDecodeError:
-                            continue
+                    for pdata in parsed_parts:
                         if pdata.get("type") == "text":
                             sess.first_user_msg = (pdata.get("text", "") or "")[:300]
                             break
@@ -639,8 +605,6 @@ def parse_antigravity_sessions() -> list:
     with conversation steps. No per-message token counts or model identifiers are
     available in the transcript format, so token/cost fields will be 0.
     """
-    from datetime import datetime
-
     sessions = []
 
     if not os.path.isdir(ANTIGRAVITY_BRAIN_DIR):
@@ -722,13 +686,7 @@ def parse_antigravity_sessions() -> list:
 
             # Set timestamp from first entry
             if sess.started_at is None:
-                created = d.get("created_at", "")
-                if created:
-                    try:
-                        dt = datetime.fromisoformat(created.replace("Z", "+00:00"))
-                        sess.started_at = int(dt.timestamp())
-                    except (ValueError, TypeError):
-                        pass
+                sess.started_at = _parse_iso_to_epoch(d.get("created_at", ""))
 
             # Capture first user message
             if msg_type == "user" and sess.first_user_msg is None:
@@ -792,18 +750,14 @@ def parse_sessions(source: str = "all") -> list:
                         continue
                     sess.line_count += 1
 
-                    # Extract real timestamp from JSONL content (before parse_message)
-                    if sess.started_at is None:
-                        try:
-                            raw = json.loads(line)
+                    msg = parse_message(line)
+                    if msg:
+                        # Extract real timestamp from JSONL content
+                        if sess.started_at is None:
+                            raw = msg._raw
                             ts_str = raw.get("timestamp") or raw.get("_audit_timestamp")
                             if ts_str:
                                 sess.started_at = _parse_iso_to_epoch(ts_str)
-                        except (json.JSONDecodeError, KeyError):
-                            pass
-
-                    msg = parse_message(line)
-                    if msg:
                         sess.messages.append(msg)
                         # Capture first user message (reuse already-loaded line dict)
                         if msg.msg_type == "user" and sess.first_user_msg is None:
@@ -829,7 +783,7 @@ def parse_sessions(source: str = "all") -> list:
     return sessions
 
 
-def parse_sessions_parallel(source: str = "all", max_workers: int = 4) -> list:
+def parse_sessions_parallel(source: str = "all", max_workers: int = 5) -> list:
     """Parse sessions from multiple sources in parallel using threads.
 
     Thread-level parallelism works well here because each parser is
