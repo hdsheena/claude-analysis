@@ -33,7 +33,7 @@ if not sessions:
 
 search_text = st.text_input(
     "🔍 Search sessions by prompt or project",
-    placeholder="e.g. 'evc' or 'sync'",
+    placeholder="e.g. 'evc' or 'deploy script'",
     key="ag_search",
 )
 
@@ -166,7 +166,7 @@ st.divider()
 st.subheader("📋 All Antigravity Sessions")
 
 rows = []
-for s in sessions:
+for s in filtered:
     ts = s.started_at
     date_str = datetime.fromtimestamp(ts if ts < 1e12 else ts / 1000).strftime("%Y-%m-%d %H:%M") if ts else "?"
     assistant_count = sum(1 for m in s.messages if m.msg_type == "assistant")
