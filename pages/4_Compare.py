@@ -52,7 +52,7 @@ if mode == "Sessions":
     )
 
     session_labels = [
-        f"[{s.project[:20]}] {s.session_id[:12]}... ({len(s.messages)} msgs)"
+        f"[{s.source}] {s.project[:20]} — {s.session_id[:12]}... ({len(s.messages)} msgs)"
         for s in session_options
     ]
 
