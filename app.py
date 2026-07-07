@@ -110,7 +110,6 @@ def _render_stop_reasons(stats):
 
 
 def _render_footer():
-    st.divider()
     st.caption(f"Last parsed: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')} • "
                "Use the sidebar to navigate between views or refresh data.")
 
@@ -186,4 +185,5 @@ with cd:
 
 st.divider()
 _render_stop_reasons(stats)
+st.divider()
 _render_footer()

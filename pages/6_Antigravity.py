@@ -29,23 +29,44 @@ if not sessions:
     st.warning("No Antigravity sessions found.")
     st.stop()
 
+# ── Search / filter ──────────────────────────────────────────────────────
+
+search_text = st.text_input(
+    "🔍 Search sessions by prompt or project",
+    placeholder="e.g. 'evc' or 'sync'",
+    key="ag_search",
+)
+
+filtered = sessions
+if search_text.strip():
+    q = search_text.strip().lower()
+    filtered = [
+        s for s in sessions
+        if q in (s.first_user_msg or "").lower()
+        or q in s.project.lower()
+    ]
+
+if not filtered:
+    st.info(f"No sessions matching '{search_text}'. Try a different query.")
+    st.stop()
+
 # ── Session selector ─────────────────────────────────────────────────────
 
 session_options = {}
-for s in sessions:
+for s in filtered:
     ts = s.started_at
     date_str = datetime.fromtimestamp(ts if ts < 1e12 else ts / 1000).strftime("%Y-%m-%d") if ts else "?"
     label = f"[{date_str}] {s.project} — {(s.first_user_msg or s.session_id)[:80]}"
     session_options[label] = s.session_id
 
 selected_label = st.selectbox(
-    f"{len(sessions)} Antigravity sessions",
+    f"{len(session_options)} sessions" + (f" matching '{search_text}'" if search_text.strip() else ""),
     options=list(session_options.keys()),
     index=0,
 )
 
 selected_id = session_options[selected_label]
-sess = next(s for s in sessions if s.session_id == selected_id)
+sess = next(s for s in filtered if s.session_id == selected_id)
 
 # ── Session header ───────────────────────────────────────────────────────
 

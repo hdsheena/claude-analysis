@@ -162,7 +162,7 @@ def _render_cache_charts(tl):
 
 
 def _render_raw_data_table(df, tl):
-    """Raw timeline data and per-source token columns + model breakdown."""
+    """Raw timeline data with per-source token columns."""
     st.divider()
     st.subheader("📋 Raw Timeline Data")
     st.dataframe(
@@ -178,19 +178,23 @@ def _render_raw_data_table(df, tl):
         },
     )
 
-    if tl.get("top_models"):
-        st.subheader("🧪 Model Breakdown")
-        mdf = pd.DataFrame({"Date": pd.to_datetime(tl["dates"])})
-        for model, values in tl["top_models"].items():
-            mdf[model.replace("claude-", "")] = values
-        st.dataframe(
-            mdf.sort_values("Date", ascending=False),
-            use_container_width=True, hide_index=True,
-            column_config={
-                "Date": st.column_config.DateColumn("Date", format="YYYY-MM-DD"),
-                **{col: st.column_config.NumberColumn(col) for col in mdf.columns if col != "Date"},
-            },
-        )
+
+def _render_model_breakdown(tl):
+    """Separate table breaking down model usage per period."""
+    if not tl.get("top_models"):
+        return
+    st.subheader("🧪 Model Breakdown")
+    mdf = pd.DataFrame({"Date": pd.to_datetime(tl["dates"])})
+    for model, values in tl["top_models"].items():
+        mdf[model.replace("claude-", "")] = values
+    st.dataframe(
+        mdf.sort_values("Date", ascending=False),
+        use_container_width=True, hide_index=True,
+        column_config={
+            "Date": st.column_config.DateColumn("Date", format="YYYY-MM-DD"),
+            **{col: st.column_config.NumberColumn(col) for col in mdf.columns if col != "Date"},
+        },
+    )
 
 
 # ═══════════════════════════════════════════════════════════════════════════════
@@ -258,3 +262,4 @@ if not zero_tokens:
     _render_cache_charts(tl)
 
 _render_raw_data_table(df, tl)
+_render_model_breakdown(tl)
