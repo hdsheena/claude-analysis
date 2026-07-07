@@ -12,12 +12,11 @@ st.set_page_config(
 import os
 import glob
 import json
-import hashlib
 import pandas as pd
 import plotly.express as px
 from collections import defaultdict
 
-from claude_analyzer.parser import project_name_from_path
+from claude_analyzer.memory import collect_memory_file_data
 from shared import render_sidebar
 
 
@@ -25,82 +24,22 @@ from shared import render_sidebar
 # Tab render functions
 # ═══════════════════════════════════════════════════════════════════════════════
 
-def _build_memory_file_data() -> list:
-    """Scan memory files across projects and return structured data."""
-    memory_patterns = [
-        os.path.expanduser("~/.claude/projects/**/memory/*.md"),
-        os.path.expanduser("~/.claude/projects/**/MEMORY.md"),
-    ]
-    repo_roots = [
-        os.path.expanduser("~/GitHub"),
-        os.path.expanduser("~/Documents/GitHub"),
-    ]
-    for root in repo_roots:
-        if os.path.isdir(root):
-            memory_patterns.append(os.path.join(root, "*", ".claude", "memory", "*.md"))
-            memory_patterns.append(os.path.join(root, "*", ".claude", "MEMORY.md"))
-
-    memory_files = sorted(
-        set(f for pattern in memory_patterns
-            for f in glob.glob(pattern, recursive=True))
-    )
-
-    file_data = []
-    for fp in memory_files:
-        fname = os.path.basename(fp)
-        proj = project_name_from_path(fp, "projects")
-        if proj in ("unknown", "local-agent"):
-            parts = fp.split(os.sep)
-            try:
-                github_idx = max(i for i, p in enumerate(parts) if p in ("GitHub", "workspaces"))
-                if github_idx + 1 < len(parts):
-                    proj = parts[github_idx + 1]
-            except ValueError:
-                pass
-        size = os.path.getsize(fp)
-        try:
-            h = hashlib.md5(open(fp, "rb").read()).hexdigest()
-        except Exception:
-            h = "?"
-
-        name_lower = fname.lower().replace(".md", "")
-        if name_lower.startswith("feedback_"):
-            cat = "feedback"
-        elif name_lower.startswith("project_"):
-            cat = "project"
-        elif name_lower.startswith("reference_"):
-            cat = "reference"
-        elif name_lower == "memory":
-            cat = "index"
-        elif name_lower in ("stakeholders", "user_identity", "dev_environment"):
-            cat = "meta"
-        else:
-            cat = "other"
-
-        try:
-            header = open(fp, encoding="utf-8", errors="replace").readline().strip()
-        except Exception:
-            header = "(unreadable)"
-
-        file_data.append({
-            "Name": fname, "Project": proj, "Category": cat,
-            "Size": size, "Hash": h, "Header": header, "Path": fp,
-        })
-
-    return file_data
-
-
 def _render_memory_tab():
     """Scan and display memory files across projects."""
     st.subheader("📝 Memory File Analysis")
 
-    file_data = _build_memory_file_data()
+    file_data = collect_memory_file_data()
 
     if not file_data:
         st.info("No memory files found.")
         return
 
-    df_mem = pd.DataFrame(file_data)
+    # Remap to TitleCase keys for Pandas display
+    df_mem = pd.DataFrame([{
+        "Name": d["name"], "Project": d["project"],
+        "Category": d["category"], "Size": d["size"],
+        "Hash": d["hash"], "Header": d["header"], "Path": d["path"],
+    } for d in file_data])
     unique_hashes = df_mem["Hash"].nunique()
     dup_count = len(df_mem) - unique_hashes
 
@@ -109,7 +48,7 @@ def _render_memory_tab():
     with c2: st.metric("Unique (by content)", unique_hashes)
     with c3: st.metric("Duplicates", dup_count)
     with c4:
-        total_bytes = sum(r["Size"] for r in file_data)
+        total_bytes = df_mem["Size"].sum()
         st.metric("Total Size", f"{total_bytes:,} bytes")
 
     st.subheader("By Category")

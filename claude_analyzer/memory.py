@@ -10,11 +10,16 @@ from .parser import project_name_from_path
 
 
 def _find_memory_files() -> list:
-    """Find all memory markdown files in .claude directories."""
+    """Find all memory markdown files in .claude directories and GitHub repos."""
     patterns = [
         os.path.expanduser("~/.claude/projects/**/memory/*.md"),
         os.path.expanduser("~/.claude/projects/**/MEMORY.md"),
     ]
+    # Also scan GitHub repos for .claude/memory files
+    for root in [os.path.expanduser("~/GitHub"), os.path.expanduser("~/Documents/GitHub")]:
+        if os.path.isdir(root):
+            patterns.append(os.path.join(root, "*", ".claude", "memory", "*.md"))
+            patterns.append(os.path.join(root, "*", ".claude", "MEMORY.md"))
     files = []
     for pattern in patterns:
         files.extend(glob.glob(pattern, recursive=True))
@@ -34,7 +39,7 @@ def _extract_project(filepath: str) -> str:
     return project_name_from_path(filepath, "projects")
 
 
-def _categorize(filename: str) -> str:
+def categorize_memory_file(filename: str) -> str:
     """Categorize a memory file by naming convention."""
     name = filename.lower().replace(".md", "")
     if name.startswith("feedback_"): return "feedback"
@@ -43,6 +48,10 @@ def _categorize(filename: str) -> str:
     if name == "memory": return "index"
     if name in ("stakeholders", "user_identity", "dev_environment"): return "meta"
     return "other"
+
+
+# Keep backward-compat alias
+_categorize = categorize_memory_file
 
 
 def _read_headers(filepath: str) -> str:
@@ -54,17 +63,39 @@ def _read_headers(filepath: str) -> str:
         return "(unreadable)"
 
 
-def _collect_file_data() -> list:
-    """Scan memory files and return structured data."""
+def collect_memory_file_data() -> list:
+    """Scan all memory files across projects and return structured data.
+
+    Returns a list of dicts with keys:
+        path, name, project, category, size (bytes), hash (md5), header (first line)
+
+    This is the single source of truth for memory file scanning — both the CLI
+    and Streamlit UI use this function.
+    """
     data = []
     for fp in _find_memory_files():
+        fname = os.path.basename(fp)
+        proj = _extract_project(fp)
+        # Fallback: extract project name from path segments
+        if proj in ("unknown", "local-agent"):
+            parts = fp.split(os.sep)
+            try:
+                github_idx = max(i for i, p in enumerate(parts) if p in ("GitHub", "workspaces", "Documents"))
+                if github_idx + 1 < len(parts):
+                    proj = parts[github_idx + 1]
+            except ValueError:
+                pass
         data.append({
-            "path": fp, "name": os.path.basename(fp),
-            "project": _extract_project(fp), "category": _categorize(os.path.basename(fp)),
+            "path": fp, "name": fname,
+            "project": proj, "category": categorize_memory_file(fname),
             "size": os.path.getsize(fp), "hash": _hash_file(fp),
             "header": _read_headers(fp),
         })
     return data
+
+
+# Keep backward-compat alias
+_collect_file_data = collect_memory_file_data
 
 
 def _build_summary(file_data: list, hash_groups: dict, name_groups: dict) -> list:
