@@ -95,6 +95,8 @@ def _render_tool_search(sessions):
                         if m["text"]:
                             st.markdown(m["text"][:2000])
 
+    st.divider()
+
 
 def _render_session_detail(sess):
     """Drill-down view for a single session: metrics, models/tools, chat/raw/jsonl tabs."""
@@ -334,7 +336,7 @@ event = st.dataframe(
         "Session ID": st.column_config.TextColumn("Session ID", width="small"),
         "Project": st.column_config.TextColumn("Project", width="medium"),
         "Source": st.column_config.TextColumn("Source", width="small"),
-        "Messages": st.column_config.NumberColumn("Msgs", format="d"),
+        "Messages": st.column_config.NumberColumn("Msgs"),
         "Tokens (fmt)": st.column_config.TextColumn("Tokens"),
         "Cache (fmt)": st.column_config.TextColumn("Cache"),
         "Started": st.column_config.DatetimeColumn("Started", format="YYYY-MM-DD HH:mm"),
