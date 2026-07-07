@@ -1,11 +1,14 @@
-"""Parse Claude session data from .claude directories, plus Freebuff, Mimo, Opencode, and Antigravity."""
+"""Parse session data from all supported sources.
+
+Types and helpers live here. Source-specific parsers are in separate modules:
+    parser_freebuff, parser_mimo, parser_opencode, parser_antigravity
+"""
 
 import re
 import json
 import os
 import sys
 import glob
-import sqlite3
 from collections import defaultdict
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from dataclasses import dataclass, field
@@ -18,16 +21,10 @@ LOCAL_AGENT_DIR = os.path.expanduser(
 )
 SESSIONS_DIR = os.path.expanduser("~/.claude/sessions")
 
-# Freebuff / Codebuff
+# Re-export source-parser paths for external reference
 FREE_BUFF_PROJECTS_DIR = os.path.expanduser("~/.config/manicode/projects")
-
-# Mimo
 MIMO_DB_PATH = os.path.expanduser("~/.local/share/mimocode/mimocode.db")
-
-# Opencode
 OPENCODE_DB_PATH = os.path.expanduser("~/.local/share/opencode/opencode.db")
-
-# Antigravity
 ANTIGRAVITY_BRAIN_DIR = os.path.expanduser("~/.gemini/antigravity/brain")
 
 
@@ -46,9 +43,9 @@ class Message:
 
 @dataclass
 class Session:
-    """One Claude session."""
+    """One session."""
     session_id: str
-    source: str  # "projects" or "local-agent"
+    source: str  # "projects", "local-agent", "freebuff", "mimo", "opencode", "antigravity"
     project: str
     filepath: str
     line_count: int = 0
@@ -76,6 +73,10 @@ class Session:
     def total_cache_create(self) -> int:
         return sum(m.cache_create_tokens for m in self.messages)
 
+
+# ═══════════════════════════════════════════════════════════════════════════════
+# Helpers
+# ═══════════════════════════════════════════════════════════════════════════════
 
 def parse_message(line: str) -> Optional[Message]:
     """Parse one JSONL line into a Message."""
@@ -164,7 +165,7 @@ def normalize_project_name(name: str) -> str:
     if not name:
         return "unknown"
 
-    # Remove duplicate consecutive words (e.g. "screenpipe screenpipe main")
+    # Remove duplicate consecutive words
     words = name.split()
     deduped = []
     for w in words:
@@ -185,17 +186,12 @@ def normalize_project_name(name: str) -> str:
 def project_name_from_path(filepath: str, source: str) -> str:
     """Extract a human-readable project name from the filepath."""
     parts = filepath.replace(os.path.expanduser("~"), "").split(os.sep)
-    # ~/.claude/projects/-Users-m4mbp-GitHub-evc/uuid.jsonl  ->  evc
-    # ~/Library/.../local-agent-mode-sessions/uuid/uuid.jsonl ->  local-agent
     if source == "projects":
         for p in parts:
             if p.startswith("-Users-"):
-                # Simplify: strip the common prefix
                 short = p.replace("-Users-m4mbp-", "").replace("-Users-m4mbp", "")
                 short = short.replace("GitHub-", "").replace("Documents-GitHub-", "")
-                # Normalize
                 short = normalize_project_name(short)
-                # Truncate long names
                 if len(short) > 50:
                     short = short[:47] + "..."
                 return short
@@ -205,503 +201,8 @@ def project_name_from_path(filepath: str, source: str) -> str:
 
 
 # ═══════════════════════════════════════════════════════════════════════════════
-# Freebuff / Codebuff parser
+# Claude (JSONL) parser
 # ═══════════════════════════════════════════════════════════════════════════════
-
-
-def _project_name_from_freebuff_path(filepath: str) -> str:
-    """Extract project name from a freebuff project directory path."""
-    # ~/.config/manicode/projects/repo-sync-tools/chats/... -> repo-sync-tools
-    parts = filepath.split(os.sep)
-    try:
-        projects_idx = parts.index("projects")
-        if projects_idx + 1 < len(parts):
-            return normalize_project_name(parts[projects_idx + 1])
-    except ValueError:
-        pass
-    return "unknown"
-
-
-def parse_freebuff_sessions() -> list:
-    """Parse Freebuff/Codebuff sessions from ~/.config/manicode/projects."""
-    sessions = []
-
-    if not os.path.isdir(FREE_BUFF_PROJECTS_DIR):
-        return sessions
-
-    # Find all chat-messages.json files
-    chat_files = glob.glob(
-        os.path.join(FREE_BUFF_PROJECTS_DIR, "*", "chats", "*", "chat-messages.json")
-    )
-
-    for chat_file in chat_files:
-        try:
-            with open(chat_file, encoding="utf-8") as f:
-                messages_raw = json.load(f)
-        except (json.JSONDecodeError, IOError):
-            continue
-
-        if not isinstance(messages_raw, list) or not messages_raw:
-            continue
-
-        # Derive session ID from path: .../projects/<proj>/chats/<timestamp>/chat-messages.json
-        chat_dir = os.path.dirname(chat_file)
-        session_id = os.path.basename(chat_dir)
-        project = _project_name_from_freebuff_path(chat_file)
-
-        sess = Session(
-            session_id=session_id,
-            source="freebuff",
-            project=project,
-            filepath=chat_file,
-            line_count=len(messages_raw),
-        )
-
-        # Parse messages
-        for raw_msg in messages_raw:
-            variant = raw_msg.get("variant", "?")
-
-            if variant == "user":
-                msg_type = "user"
-            elif variant == "ai":
-                msg_type = "assistant"
-            else:
-                msg_type = variant
-
-            msg = Message(msg_type=msg_type)
-            msg._raw = raw_msg
-
-            # Extract content from blocks or top-level content
-            blocks = raw_msg.get("blocks", [])
-            tools = []
-            if variant == "ai" and blocks:
-                for block in blocks:
-                    if isinstance(block, dict):
-                        block_type = block.get("type", "")
-                        if block_type == "tool":
-                            tools.append(block.get("content", "?"))
-
-            msg.tools_used = tools
-
-            # Timestamp: use the chat directory name or file mtime
-            if sess.started_at is None:
-                try:
-                    sess.started_at = int(os.path.getmtime(chat_file))
-                except OSError:
-                    pass
-
-            sess.messages.append(msg)
-
-            # Capture first user message
-            if variant == "user" and sess.first_user_msg is None:
-                content = raw_msg.get("content", "")
-                if not content and blocks:
-                    for block in blocks:
-                        if isinstance(block, dict) and block.get("type") == "text":
-                            content = block.get("content", "")
-                            break
-                sess.first_user_msg = (content or "")[:300]
-
-        # Read chat-meta.json for extra metadata
-        meta_file = os.path.join(chat_dir, "chat-meta.json")
-        if os.path.exists(meta_file):
-            try:
-                with open(meta_file, encoding="utf-8") as f:
-                    meta = json.load(f)
-                sess.name = meta.get("firstPrompt", "")[:100]
-            except (json.JSONDecodeError, IOError):
-                pass
-
-        sessions.append(sess)
-
-    return sessions
-
-
-# ═══════════════════════════════════════════════════════════════════════════════
-# Mimo parser
-# ═══════════════════════════════════════════════════════════════════════════════
-
-
-def parse_mimo_sessions() -> list:
-    """Parse Mimo sessions from SQLite database at ~/.local/share/mimocode/."""
-    sessions = []
-
-    if not os.path.isfile(MIMO_DB_PATH):
-        return sessions
-
-    try:
-        conn = sqlite3.connect(MIMO_DB_PATH)
-        conn.row_factory = sqlite3.Row
-    except sqlite3.Error:
-        return sessions
-
-    try:
-        # Load projects for directory mapping
-        projects = {}
-        for row in conn.execute("SELECT id, worktree, vcs FROM project"):
-            projects[row["id"]] = {
-                "worktree": row["worktree"] or "",
-                "vcs": row["vcs"] or "",
-            }
-
-        # Load sessions
-        session_rows = conn.execute(
-            """SELECT id, project_id, slug, title, directory, time_created,
-                      time_updated, summary_additions, summary_deletions,
-                      summary_files, summary_diffs
-               FROM session
-               ORDER BY time_created"""
-        ).fetchall()
-
-        for srow in session_rows:
-            sid = srow["id"]
-            proj_info = projects.get(srow["project_id"], {})
-            worktree = proj_info.get("worktree", srow["directory"] or "")
-            proj_name = normalize_project_name(os.path.basename(worktree.rstrip("/")) if worktree else "unknown")
-
-            sess = Session(
-                session_id=sid,
-                source="mimo",
-                project=proj_name,
-                filepath=MIMO_DB_PATH,
-            )
-            sess.name = srow["title"] or ""
-            sess.kind = "mimo"
-            sess.cwd = worktree
-            if srow["time_created"]:
-                sess.started_at = srow["time_created"]
-
-            # Load messages for this session
-            msg_rows = conn.execute(
-                "SELECT id, agent_id, data FROM message WHERE session_id = ? ORDER BY time_created",
-                (sid,),
-            ).fetchall()
-
-            msg_ids = [m["id"] for m in msg_rows]
-
-            # Load parts and group by message_id
-            parts_by_msg = defaultdict(list)
-            if msg_ids:
-                placeholders = ",".join("?" for _ in msg_ids)
-                part_rows = conn.execute(
-                    f"SELECT message_id, data FROM part WHERE message_id IN ({placeholders}) ORDER BY time_created",
-                    msg_ids,
-                ).fetchall()
-                for prow in part_rows:
-                    parts_by_msg[prow["message_id"]].append(prow["data"])
-
-            # Build Message objects
-            for mrow in msg_rows:
-                try:
-                    mdata = json.loads(mrow["data"]) if isinstance(mrow["data"], str) else (mrow["data"] or {})
-                except json.JSONDecodeError:
-                    mdata = {}
-
-                role = mdata.get("role", "?")
-                msg_type = "assistant" if role == "assistant" else ("user" if role == "user" else role)
-                msg = Message(msg_type=msg_type)
-                msg._raw = mdata
-
-                # Model info
-                model_info = mdata.get("model", {})
-                if isinstance(model_info, dict):
-                    msg.model = model_info.get("modelID", "") or ""
-
-                # Extract token data (same keys as Opencode: tokens.input/output/cache)
-                tok = mdata.get("tokens", {})
-                if isinstance(tok, dict):
-                    msg.input_tokens = tok.get("input", 0) or 0
-                    msg.output_tokens = tok.get("output", 0) or 0
-                    cache = tok.get("cache", {})
-                    if isinstance(cache, dict):
-                        msg.cache_read_tokens = cache.get("read", 0) or 0
-                        msg.cache_write_tokens = cache.get("write", 0) or 0
-
-                # Parts: extract tools and stash for chat view
-                parts = parts_by_msg.get(mrow["id"], [])
-                tools, parsed_parts = _parse_parts(parts)
-                msg.tools_used = tools
-                msg._raw["_parts"] = parsed_parts
-
-                sess.messages.append(msg)
-
-                # Capture first user message from text parts
-                if role == "user" and sess.first_user_msg is None:
-                    for pdata in parsed_parts:
-                        if pdata.get("type") == "text":
-                            sess.first_user_msg = (pdata.get("text", "") or "")[:300]
-                            break
-
-            sess.line_count = len(sess.messages)
-            sessions.append(sess)
-
-    finally:
-        conn.close()
-
-    return sessions
-
-
-# ═══════════════════════════════════════════════════════════════════════════════
-# Opencode parser
-# ═══════════════════════════════════════════════════════════════════════════════
-
-
-def parse_opencode_sessions() -> list:
-    """Parse Opencode sessions from SQLite database at ~/.local/share/opencode/."""
-    sessions = []
-
-    if not os.path.isfile(OPENCODE_DB_PATH):
-        return sessions
-
-    try:
-        conn = sqlite3.connect(OPENCODE_DB_PATH)
-        conn.row_factory = sqlite3.Row
-    except sqlite3.Error:
-        return sessions
-
-    try:
-        # Load workspaces for directory mapping
-        workspaces = {}
-        for row in conn.execute("SELECT id, directory FROM workspace"):
-            workspaces[row["id"]] = row["directory"] or ""
-
-        # Load sessions with pre-computed token columns
-        session_rows = conn.execute(
-            """SELECT id, slug, title, directory, workspace_id, agent, model,
-                      tokens_input, tokens_output, tokens_cache_read, tokens_cache_write,
-                      time_created, time_updated
-               FROM session
-               ORDER BY time_created"""
-        ).fetchall()
-
-        for srow in session_rows:
-            sid = srow["id"]
-            # Project name: prefer workspace directory, fallback to session directory
-            workdir = workspaces.get(srow["workspace_id"], srow["directory"] or "")
-            proj_name = normalize_project_name(os.path.basename(workdir.rstrip("/")) if workdir else "unknown")
-
-            sess = Session(
-                session_id=sid,
-                source="opencode",
-                project=proj_name,
-                filepath=OPENCODE_DB_PATH,
-            )
-            sess.name = srow["title"] or srow["slug"] or ""
-            sess.kind = srow["agent"] or "opencode"
-            sess.cwd = workdir
-            if srow["time_created"]:
-                sess.started_at = srow["time_created"]
-
-            # Pre-computed token totals (store on session for stats)
-            pre_input = srow["tokens_input"] or 0
-            pre_output = srow["tokens_output"] or 0
-            pre_cache_read = srow["tokens_cache_read"] or 0
-            pre_cache_write = srow["tokens_cache_write"] or 0
-
-            # Load messages for this session
-            msg_rows = conn.execute(
-                "SELECT id, data, time_created FROM message WHERE session_id = ? ORDER BY time_created",
-                (sid,),
-            ).fetchall()
-
-            # Build message ID lookup for parts
-            msg_ids = [m["id"] for m in msg_rows]
-
-            # Load parts and group by message_id
-            parts_by_msg = defaultdict(list)
-            if msg_ids:
-                placeholders = ",".join("?" for _ in msg_ids)
-                part_rows = conn.execute(
-                    f"SELECT message_id, data FROM part WHERE message_id IN ({placeholders}) ORDER BY time_created",
-                    msg_ids,
-                ).fetchall()
-                for prow in part_rows:
-                    parts_by_msg[prow["message_id"]].append(prow["data"])
-
-            # Build Message objects
-            tokens_assigned = 0
-            for mrow in msg_rows:
-                try:
-                    mdata = json.loads(mrow["data"]) if isinstance(mrow["data"], str) else (mrow["data"] or {})
-                except json.JSONDecodeError:
-                    mdata = {}
-
-                role = mdata.get("role", "?")
-                msg_type = "assistant" if role == "assistant" else ("user" if role == "user" else role)
-                msg = Message(msg_type=msg_type)
-                msg._raw = mdata
-
-                # Model info: Opencode stores modelID/providerID at top level
-                msg.model = mdata.get("modelID", "") or ""
-                if not msg.model:
-                    model_info = mdata.get("model", {})
-                    if isinstance(model_info, dict):
-                        msg.model = model_info.get("modelID", "") or ""
-
-                # Extract message-level token data from JSON
-                tok = mdata.get("tokens", {})
-                if isinstance(tok, dict):
-                    msg.input_tokens = tok.get("input", 0) or 0
-                    msg.output_tokens = tok.get("output", 0) or 0
-                    msg.cache_read_tokens = tok.get("cache_read", 0) or 0
-                    msg.cache_create_tokens = tok.get("cache_write", 0) or 0
-                    tokens_assigned += msg.input_tokens + msg.output_tokens
-
-                # Parts: extract tools and stash for chat view
-                parts = parts_by_msg.get(mrow["id"], [])
-                tools, parsed_parts = _parse_parts(parts)
-                msg.tools_used = tools
-                msg._raw["_parts"] = parsed_parts
-
-                sess.messages.append(msg)
-
-                # Capture first user message from text parts
-                if role == "user" and sess.first_user_msg is None:
-                    for pdata in parsed_parts:
-                        if pdata.get("type") == "text":
-                            sess.first_user_msg = (pdata.get("text", "") or "")[:300]
-                            break
-
-            # Fallback: if message-level tokens are all 0, use session-level pre-computed totals
-            if tokens_assigned == 0 and sess.messages:
-                assistant_msgs = [m for m in sess.messages if m.msg_type == "assistant"]
-                if assistant_msgs:
-                    first = assistant_msgs[0]
-                    first.input_tokens = pre_input
-                    first.output_tokens = pre_output
-                    first.cache_read_tokens = pre_cache_read
-                    first.cache_create_tokens = pre_cache_write
-                else:
-                    # No assistant messages — create a synthetic one for stats
-                    msg = Message(msg_type="assistant")
-                    msg.model = srow["model"] or ""
-                    msg.input_tokens = pre_input
-                    msg.output_tokens = pre_output
-                    msg.cache_read_tokens = pre_cache_read
-                    msg.cache_create_tokens = pre_cache_write
-                    sess.messages.append(msg)
-
-            sess.line_count = len(sess.messages)
-            sessions.append(sess)
-
-    finally:
-        conn.close()
-
-    return sessions
-
-
-# ═══════════════════════════════════════════════════════════════════════════════
-# Antigravity parser
-# ═══════════════════════════════════════════════════════════════════════════════
-
-
-def parse_antigravity_sessions() -> list:
-    """Parse Antigravity sessions from ~/.gemini/antigravity/brain/ transcript files.
-
-    Each brain directory (UUID-named) contains a .system_generated/logs/transcript.jsonl
-    with conversation steps. No per-message token counts or model identifiers are
-    available in the transcript format, so token/cost fields will be 0.
-    """
-    sessions = []
-
-    if not os.path.isdir(ANTIGRAVITY_BRAIN_DIR):
-        return sessions
-
-    for brain_dir in sorted(os.listdir(ANTIGRAVITY_BRAIN_DIR)):
-        brain_path = os.path.join(ANTIGRAVITY_BRAIN_DIR, brain_dir)
-        if not os.path.isdir(brain_path):
-            continue
-
-        transcript_path = os.path.join(
-            brain_path, ".system_generated", "logs", "transcript.jsonl"
-        )
-        if not os.path.isfile(transcript_path):
-            continue
-
-        session_id = brain_dir
-
-        # Try to extract project name from metadata files in the brain dir
-        project = "antigravity"
-        for fname in sorted(os.listdir(brain_path)):
-            fpath = os.path.join(brain_path, fname)
-            if not os.path.isfile(fpath):
-                continue
-            name, ext = os.path.splitext(fname)
-            if ext in (".md", ".json") and name not in (
-                "implementation_plan", "task", "walkthrough",
-            ):
-                project = normalize_project_name(name)
-                break
-
-        sess = Session(
-            session_id=session_id,
-            source="antigravity",
-            project=project,
-            filepath=transcript_path,
-        )
-
-        try:
-            with open(transcript_path, encoding="utf-8", errors="replace") as f:
-                lines = f.readlines()
-        except (IOError, UnicodeDecodeError):
-            continue
-
-        sess.line_count = len(lines)
-
-        for line in lines:
-            line = line.strip()
-            if not line:
-                continue
-            try:
-                d = json.loads(line)
-            except json.JSONDecodeError:
-                continue
-
-            entry_source = d.get("source", "")
-
-            # Map Antigravity source to msg_type
-            if entry_source == "MODEL":
-                msg_type = "assistant"
-            elif entry_source == "USER_EXPLICIT":
-                msg_type = "user"
-            else:
-                continue  # Skip system/internal entries
-
-            msg = Message(msg_type=msg_type)
-            msg._raw = d
-
-            # Extract tool names from tool_calls
-            tool_calls = d.get("tool_calls", [])
-            if isinstance(tool_calls, list):
-                msg.tools_used = [
-                    tc.get("name", "?")
-                    for tc in tool_calls
-                    if isinstance(tc, dict)
-                ]
-
-            sess.messages.append(msg)
-
-            # Set timestamp from first entry
-            if sess.started_at is None:
-                sess.started_at = _parse_iso_to_epoch(d.get("created_at", ""))
-
-            # Capture first user message
-            if msg_type == "user" and sess.first_user_msg is None:
-                content = d.get("content", "")
-                if isinstance(content, str):
-                    sess.first_user_msg = content[:300]
-
-        # Fallback timestamp from file mtime
-        if sess.started_at is None:
-            try:
-                sess.started_at = int(os.path.getmtime(transcript_path))
-            except OSError:
-                pass
-
-        sessions.append(sess)
-
-    return sessions
-
 
 def parse_sessions(source: str = "all") -> list:
     """Parse all sessions from all sources. Returns list of Session objects.
@@ -756,7 +257,7 @@ def parse_sessions(source: str = "all") -> list:
                             if ts_str:
                                 sess.started_at = _parse_iso_to_epoch(ts_str)
                         sess.messages.append(msg)
-                        # Capture first user message (reuse already-loaded line dict)
+                        # Capture first user message
                         if msg.msg_type == "user" and sess.first_user_msg is None:
                             try:
                                 inner = msg._raw.get("message", {})
@@ -790,7 +291,6 @@ def parse_sessions_parallel(source: str = "all", max_workers: int = 5) -> list:
     For individual sources, falls back to sequential parse.
     """
     if source == "all":
-        # Map source labels to parse functions
         tasks = {
             "claude": lambda: parse_sessions("claude"),
             "freebuff": parse_freebuff_sessions,
@@ -810,7 +310,6 @@ def parse_sessions_parallel(source: str = "all", max_workers: int = 5) -> list:
                 result = future.result()
                 all_sessions.extend(result)
             except Exception as e:
-                # Log but don't fail — one source failing shouldn't block the rest
                 print(f"[claude-analyzer] WARNING: failed to parse {label}: {e}", file=sys.stderr)
 
     return all_sessions
@@ -842,7 +341,7 @@ def enrich_sessions(sessions: list) -> None:
     """Join session registry data into Session objects in-place.
 
     Sets started_at from the registry when available, otherwise falls back
-    to the JSONL file's modification time (same approach as the Freebuff parser).
+    to the JSONL file's modification time.
     """
     registry = parse_session_registry()
     for sess in sessions:
@@ -859,3 +358,10 @@ def enrich_sessions(sessions: list) -> None:
                 sess.started_at = int(os.path.getmtime(sess.filepath))
             except OSError:
                 pass
+
+
+# --- Source parsers (imported at bottom to avoid circular imports) ---
+from .parser_freebuff import parse_freebuff_sessions  # noqa: E402
+from .parser_mimo import parse_mimo_sessions  # noqa: E402
+from .parser_opencode import parse_opencode_sessions  # noqa: E402
+from .parser_antigravity import parse_antigravity_sessions  # noqa: E402

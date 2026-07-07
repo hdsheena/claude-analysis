@@ -25,10 +25,8 @@ from shared import render_sidebar
 # Tab render functions
 # ═══════════════════════════════════════════════════════════════════════════════
 
-def _render_memory_tab():
-    """Scan and display memory files across projects."""
-    st.subheader("📝 Memory File Analysis")
-
+def _build_memory_file_data() -> list:
+    """Scan memory files across projects and return structured data."""
     memory_patterns = [
         os.path.expanduser("~/.claude/projects/**/memory/*.md"),
         os.path.expanduser("~/.claude/projects/**/MEMORY.md"),
@@ -46,10 +44,6 @@ def _render_memory_tab():
         set(f for pattern in memory_patterns
             for f in glob.glob(pattern, recursive=True))
     )
-
-    if not memory_files:
-        st.info("No memory files found.")
-        return
 
     file_data = []
     for fp in memory_files:
@@ -92,6 +86,19 @@ def _render_memory_tab():
             "Name": fname, "Project": proj, "Category": cat,
             "Size": size, "Hash": h, "Header": header, "Path": fp,
         })
+
+    return file_data
+
+
+def _render_memory_tab():
+    """Scan and display memory files across projects."""
+    st.subheader("📝 Memory File Analysis")
+
+    file_data = _build_memory_file_data()
+
+    if not file_data:
+        st.info("No memory files found.")
+        return
 
     df_mem = pd.DataFrame(file_data)
     unique_hashes = df_mem["Hash"].nunique()
@@ -379,7 +386,6 @@ def _render_data_sources_tab():
                     conn.close()
                 except Exception:
                     counts[key] = "?"
-        # Antigravity: count transcript files
         brain_dir = os.path.expanduser("~/.gemini/antigravity/brain")
         if os.path.isdir(brain_dir):
             counts["antigravity"] = len(glob.glob(os.path.join(brain_dir, "*", ".system_generated", "logs", "transcript.jsonl")))
@@ -397,6 +403,95 @@ def _render_data_sources_tab():
                 st.metric(src_key.replace("-", " ").title(), val)
     except Exception:
         st.caption("(Could not count sessions)")
+
+
+def _categorize_repo_files(repo_dir: str) -> dict:
+    """Walk a repo's tool config directory and categorize files."""
+    categories = {"skills": [], "plans": [], "commands": [], "settings": [],
+                  "memory": [], "hooks": [], "agents": [], "taste": [],
+                  "config": [], "other": []}
+
+    for walk_root, walk_dirs, walk_files in os.walk(repo_dir):
+        walk_dirs[:] = [wd for wd in walk_dirs if wd != "node_modules"]
+        rel = os.path.relpath(walk_root, repo_dir)
+        for fname in walk_files:
+            relpath = os.path.join(rel, fname) if rel != "." else fname
+            if "skills" in rel.split(os.sep) or fname.endswith("SKILL.md"):
+                categories["skills"].append(relpath)
+            elif "plans" in rel.split(os.sep) and fname.endswith(".md"):
+                categories["plans"].append(relpath)
+            elif "command" in rel.lower() or "commands" in rel.split(os.sep):
+                categories["commands"].append(relpath)
+            elif fname.endswith(".json") and "setting" in fname.lower():
+                categories["settings"].append(relpath)
+            elif "memory" in rel.split(os.sep) and fname.endswith(".md"):
+                categories["memory"].append(relpath)
+            elif "hooks" in rel.split(os.sep):
+                categories["hooks"].append(relpath)
+            elif "agents" in rel.split(os.sep) or "agent" in rel.split(os.sep):
+                categories["agents"].append(relpath)
+            elif "taste" in rel.split(os.sep):
+                categories["taste"].append(relpath)
+            elif fname == "package.json":
+                categories["config"].append(relpath)
+            else:
+                categories["other"].append(relpath)
+
+    return categories
+
+
+def _display_repo_files(tool_contents: dict, repo_dirs: list):
+    """Display categorized files table for a tool across repos."""
+    all_files = []
+    for d in repo_dirs:
+        repo_name = os.path.basename(os.path.dirname(d))
+        cats = tool_contents[repo_name]
+        for cat, files in cats.items():
+            if cat == "other":
+                continue
+            for relpath in files[:5]:
+                fpath = os.path.join(d, relpath)
+                try:
+                    header = open(fpath, encoding="utf-8", errors="replace").readline().strip()
+                except Exception:
+                    header = "(unreadable)"
+                all_files.append({
+                    "Repo": repo_name, "Category": cat,
+                    "File": relpath, "Header": header[:120],
+                })
+
+    repo_rows = []
+    for repo_name, cats in tool_contents.items():
+        row = {"Repo": repo_name}
+        for cat in ["skills", "plans", "commands", "settings", "memory",
+                    "hooks", "agents", "taste", "config", "other"]:
+            count = len(cats.get(cat, []))
+            if count > 0:
+                row[cat.capitalize()] = count
+        repo_rows.append(row)
+
+    total_files = sum(len(v) for cats in tool_contents.values() for v in cats.values())
+    st.caption(f"**{total_files} files** across {len(repo_dirs)} repo(s)")
+    st.dataframe(pd.DataFrame(repo_rows), use_container_width=True, hide_index=True)
+
+    if all_files:
+        by_cat = defaultdict(list)
+        for f in all_files:
+            by_cat[f["Category"]].append(f)
+        for cat in ["skills", "plans", "commands", "memory", "taste",
+                    "settings", "hooks", "agents", "config"]:
+            items = by_cat.get(cat, [])
+            if items:
+                st.caption(f"**{cat.capitalize()}** ({len(items)} files)")
+                st.dataframe(
+                    pd.DataFrame(items)[["Repo", "File", "Header"]],
+                    use_container_width=True, hide_index=True,
+                    column_config={
+                        "Repo": st.column_config.TextColumn("Repo", width="small"),
+                        "File": st.column_config.TextColumn("File"),
+                        "Header": st.column_config.TextColumn("Header", width="large"),
+                    },
+                )
 
 
 def _render_repo_configs_tab():
@@ -452,89 +547,11 @@ def _render_repo_configs_tab():
         with st.expander(f"{tool_info['emoji']} **{tool_info['label']}** — {len(dirs)} repo(s)",
                          expanded=len(dirs) <= 4):
             tool_contents = {}
-            all_files = []
-            total_files = 0
-
             for d in dirs:
                 repo_name = os.path.basename(os.path.dirname(d))
-                categories = {"skills": [], "plans": [], "commands": [], "settings": [],
-                              "memory": [], "hooks": [], "agents": [], "taste": [],
-                              "config": [], "other": []}
+                tool_contents[repo_name] = _categorize_repo_files(d)
 
-                for walk_root, walk_dirs, walk_files in os.walk(d):
-                    walk_dirs[:] = [wd for wd in walk_dirs if wd != "node_modules"]
-                    rel = os.path.relpath(walk_root, d)
-                    for fname in walk_files:
-                        relpath = os.path.join(rel, fname) if rel != "." else fname
-                        if "skills" in rel.split(os.sep) or fname.endswith("SKILL.md"):
-                            categories["skills"].append(relpath)
-                        elif "plans" in rel.split(os.sep) and fname.endswith(".md"):
-                            categories["plans"].append(relpath)
-                        elif "command" in rel.lower() or "commands" in rel.split(os.sep):
-                            categories["commands"].append(relpath)
-                        elif fname.endswith(".json") and "setting" in fname.lower():
-                            categories["settings"].append(relpath)
-                        elif "memory" in rel.split(os.sep) and fname.endswith(".md"):
-                            categories["memory"].append(relpath)
-                        elif "hooks" in rel.split(os.sep):
-                            categories["hooks"].append(relpath)
-                        elif "agents" in rel.split(os.sep) or "agent" in rel.split(os.sep):
-                            categories["agents"].append(relpath)
-                        elif "taste" in rel.split(os.sep):
-                            categories["taste"].append(relpath)
-                        elif fname == "package.json":
-                            categories["config"].append(relpath)
-                        else:
-                            categories["other"].append(relpath)
-
-                total_files += sum(len(v) for v in categories.values())
-                tool_contents[repo_name] = categories
-
-                for cat, files in categories.items():
-                    if cat == "other":
-                        continue
-                    for relpath in files[:5]:
-                        fpath = os.path.join(d, relpath)
-                        try:
-                            header = open(fpath, encoding="utf-8", errors="replace").readline().strip()
-                        except Exception:
-                            header = "(unreadable)"
-                        all_files.append({
-                            "Repo": repo_name, "Tool": tool_info["label"],
-                            "Category": cat, "File": relpath, "Header": header[:120],
-                        })
-
-            repo_rows = []
-            for repo_name, cats in tool_contents.items():
-                row = {"Repo": repo_name}
-                for cat in ["skills", "plans", "commands", "settings", "memory",
-                            "hooks", "agents", "taste", "config", "other"]:
-                    count = len(cats.get(cat, []))
-                    if count > 0:
-                        row[cat.capitalize()] = count
-                repo_rows.append(row)
-
-            st.caption(f"**{total_files} files** across {len(dirs)} repo(s)")
-            st.dataframe(pd.DataFrame(repo_rows), use_container_width=True, hide_index=True)
-
-            if all_files:
-                by_cat = defaultdict(list)
-                for f in all_files:
-                    by_cat[f["Category"]].append(f)
-                for cat in ["skills", "plans", "commands", "memory", "taste",
-                            "settings", "hooks", "agents", "config"]:
-                    items = by_cat.get(cat, [])
-                    if items:
-                        st.caption(f"**{cat.capitalize()}** ({len(items)} files)")
-                        st.dataframe(
-                            pd.DataFrame(items)[["Repo", "File", "Header"]],
-                            use_container_width=True, hide_index=True,
-                            column_config={
-                                "Repo": st.column_config.TextColumn("Repo", width="small"),
-                                "File": st.column_config.TextColumn("File"),
-                                "Header": st.column_config.TextColumn("Header", width="large"),
-                            },
-                        )
+            _display_repo_files(tool_contents, dirs)
 
 
 # ═══════════════════════════════════════════════════════════════════════════════

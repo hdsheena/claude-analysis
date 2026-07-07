@@ -34,6 +34,104 @@ def _bar_chart(
     return "\n".join(lines)
 
 
+def _overview_section(stats: AggStats) -> str:
+    """Build the overview section of the summary report."""
+    return f"""
+┌─ OVERVIEW ──────────────────────────────────────┐
+│ Total sessions:      {stats.total_sessions:>5}                         │
+│   from projects/:    {stats.projects_source_count:>5}                         │
+│   from local-agent:  {stats.local_agent_count:>5}                         │
+│ Total messages:      {format_number(stats.total_messages):>10}                         │
+│ Total lines:         {format_number(stats.total_lines):>10}                         │
+│ Total size on disk:  {stats.total_size_mb:>10.0f} MB                      │
+└──────────────────────────────────────────────────┘"""
+
+
+def _token_section(stats: AggStats) -> str:
+    """Build the token/cost section of the summary report."""
+    total_all_tokens = stats.total_input_tokens + stats.total_output_tokens
+    return f"""
+┌─ TOKENS ────────────────────────────────────────┐
+│ Input tokens:       {format_tokens(stats.total_input_tokens):>10}                         │
+│ Output tokens:      {format_tokens(stats.total_output_tokens):>10}                         │
+│ Total I/O:          {format_tokens(total_all_tokens):>10}                         │
+│ Cache read:         {format_tokens(stats.total_cache_read):>10}                         │
+│ Cache created:      {format_tokens(stats.total_cache_create):>10}                         │
+│ Cache hit ratio:    {stats.cache_hit_ratio:>9.1f}%                        │
+│ Estimated cost:    ${stats.estimated_cost:>9.2f}                         │
+└──────────────────────────────────────────────────┘"""
+
+
+def _model_section(stats: AggStats) -> str:
+    """Build the model breakdown sections of the summary report."""
+    lines = []
+
+    model_items = [(m, c) for m, c in stats.model_counts.most_common(10)]
+    lines.append(_bar_chart(model_items, "MODEL USAGE (assistant calls)"))
+
+    lines.append("\n  Model Token Breakdown:")
+    lines.append(f"  {'Model':<30} {'Input':>10} {'Output':>10}")
+    lines.append("  " + "─" * 52)
+    for model in stats.model_counts.most_common(8):
+        m = model[0]
+        inp = format_tokens(stats.model_input_tokens.get(m, 0))
+        out = format_tokens(stats.model_output_tokens.get(m, 0))
+        short_m = m[:28]
+        lines.append(f"  {short_m:<30} {inp:>10} {out:>10}")
+
+    return "\n".join(lines)
+
+
+def _project_section(stats: AggStats) -> str:
+    """Build the project breakdown sections of the summary report."""
+    lines = []
+
+    project_items = [(p, c) for p, c in stats.projects.most_common(15)]
+    lines.append(_bar_chart(project_items, "PROJECTS BY SESSION COUNT"))
+
+    size_items = sorted(stats.project_size.items(), key=lambda x: x[1], reverse=True)[:15]
+    lines.append(_bar_chart(
+        [(p, s) for p, s in size_items],
+        "PROJECTS BY DISK SIZE",
+        value_formatter=format_bytes,
+    ))
+
+    return "\n".join(lines)
+
+
+def _length_distribution_section(stats: AggStats) -> str:
+    """Build the session length distribution section."""
+    lengths = sorted(stats.session_lengths)
+    if not lengths:
+        return ""
+
+    lines = [f"""
+  SESSION LENGTH DISTRIBUTION
+  {'─' * 60}
+  Min: {lengths[0]},  Max: {lengths[-1]},  Median: {lengths[len(lengths)//2]}
+  Average: {sum(lengths)//len(lengths)}"""]
+
+    buckets = [
+        (0, 10), (10, 25), (25, 50), (50, 100),
+        (100, 250), (250, 500), (500, 1000), (1000, 5000),
+        (5000, 99999),
+    ]
+    max_count = 0
+    bucket_counts = []
+    for lo, hi in buckets:
+        count = sum(1 for s in lengths if lo <= s < hi)
+        bucket_counts.append((f"{lo:>5}-{hi:<5}", count))
+        max_count = max(max_count, count)
+
+    if max_count > 0:
+        for label, count in bucket_counts:
+            bar_len = int(count / max_count * 40) if max_count > 0 else 0
+            bar = "█" * bar_len
+            lines.append(f"  {label}: {count:>4} {bar}")
+
+    return "\n".join(lines)
+
+
 def summary(stats: AggStats) -> str:
     """Print a comprehensive summary of all stats."""
     sections = []
@@ -44,57 +142,10 @@ def summary(stats: AggStats) -> str:
 ║     CLAUDE CODE SESSION ANALYSIS REPORT          ║
 ╚══════════════════════════════════════════════════╝""")
 
-    # Overview
-    sections.append(f"""
-┌─ OVERVIEW ──────────────────────────────────────┐
-│ Total sessions:      {stats.total_sessions:>5}                         │
-│   from projects/:    {stats.projects_source_count:>5}                         │
-│   from local-agent:  {stats.local_agent_count:>5}                         │
-│ Total messages:      {format_number(stats.total_messages):>10}                         │
-│ Total lines:         {format_number(stats.total_lines):>10}                         │
-│ Total size on disk:  {stats.total_size_mb:>10.0f} MB                      │
-└──────────────────────────────────────────────────┘""")
-
-    # Token summary
-    total_all_tokens = stats.total_input_tokens + stats.total_output_tokens
-    sections.append(f"""
-┌─ TOKENS ────────────────────────────────────────┐
-│ Input tokens:       {format_tokens(stats.total_input_tokens):>10}                         │
-│ Output tokens:      {format_tokens(stats.total_output_tokens):>10}                         │
-│ Total I/O:          {format_tokens(total_all_tokens):>10}                         │
-│ Cache read:         {format_tokens(stats.total_cache_read):>10}                         │
-│ Cache created:      {format_tokens(stats.total_cache_create):>10}                         │
-│ Cache hit ratio:    {stats.cache_hit_ratio:>9.1f}%                        │
-│ Estimated cost:    ${stats.estimated_cost:>9.2f}                         │
-└──────────────────────────────────────────────────┘""")
-
-    # Model distribution
-    model_items = [(m, c) for m, c in stats.model_counts.most_common(10)]
-    sections.append(_bar_chart(model_items, "MODEL USAGE (assistant calls)"))
-
-    # Also show model token breakdown
-    sections.append("\n  Model Token Breakdown:")
-    sections.append(f"  {'Model':<30} {'Input':>10} {'Output':>10}")
-    sections.append("  " + "─" * 52)
-    for model in stats.model_counts.most_common(8):
-        m = model[0]
-        inp = format_tokens(stats.model_input_tokens.get(m, 0))
-        out = format_tokens(stats.model_output_tokens.get(m, 0))
-        short_m = m[:28]
-        sections.append(f"  {short_m:<30} {inp:>10} {out:>10}")
-
-    # Project breakdown
-    project_items = [(p, c) for p, c in stats.projects.most_common(15)]
-    sections.append(_bar_chart(project_items, "PROJECTS BY SESSION COUNT"))
-
-    # Projects by size
-    size_items = sorted(stats.project_size.items(), key=lambda x: x[1], reverse=True)[:15]
-    size_chart = _bar_chart(
-        [(p, s) for p, s in size_items],
-        "PROJECTS BY DISK SIZE",
-        value_formatter=format_bytes,
-    )
-    sections.append(size_chart)
+    sections.append(_overview_section(stats))
+    sections.append(_token_section(stats))
+    sections.append(_model_section(stats))
+    sections.append(_project_section(stats))
 
     # Top tools
     tool_items = stats.tool_counts.most_common(15)
@@ -108,33 +159,7 @@ def summary(stats: AggStats) -> str:
     type_items = stats.msg_types.most_common(10)
     sections.append(_bar_chart(type_items, "MESSAGE TYPES"))
 
-    # Session length distribution
-    lengths = sorted(stats.session_lengths)
-    if lengths:
-        sections.append(f"""
-  SESSION LENGTH DISTRIBUTION
-  {'─' * 60}
-  Min: {lengths[0]},  Max: {lengths[-1]},  Median: {lengths[len(lengths)//2]}
-  Average: {sum(lengths)//len(lengths)}""")
-
-        # Buckets
-        buckets = [
-            (0, 10), (10, 25), (25, 50), (50, 100),
-            (100, 250), (250, 500), (500, 1000), (1000, 5000),
-            (5000, 99999),
-        ]
-        max_count = 0
-        bucket_counts = []
-        for lo, hi in buckets:
-            count = sum(1 for s in lengths if lo <= s < hi)
-            bucket_counts.append((f"{lo:>5}-{hi:<5}", count))
-            max_count = max(max_count, count)
-
-        if max_count > 0:
-            for label, count in bucket_counts:
-                bar_len = int(count / max_count * 40) if max_count > 0 else 0
-                bar = "█" * bar_len
-                sections.append(f"  {label}: {count:>4} {bar}")
+    sections.append(_length_distribution_section(stats))
 
     return "\n".join(sections)
 
@@ -171,7 +196,6 @@ def session_list(sessions: list, limit: int = 20) -> str:
     lines.append(f"  {'ID':<10} {'Project':<25} {'Msgs':>6} {'Tokens':>10} {'First msg...'}")
     lines.append("  " + "─" * 90)
 
-    # Sort by message count desc
     sorted_sessions = sorted(sessions, key=lambda s: len(s.messages), reverse=True)
 
     for sess in sorted_sessions[:limit]:
