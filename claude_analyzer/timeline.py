@@ -8,6 +8,7 @@ from datetime import datetime, timedelta
 from typing import Optional
 
 from .parser import Session
+from .stats import _price_for, _token_cost
 
 
 def _parse_ts(val) -> Optional[float]:
@@ -48,15 +49,13 @@ def _load_registry() -> dict:
             ts = d.get("startedAt")
             if sid and ts:
                 registry[sid] = _parse_ts(ts)
-        except Exception:
+        except (json.JSONDecodeError, OSError, TypeError, ValueError):
             pass
     return registry
 
 
 def _compute_buckets(sessions: list, key_fn, registry: dict) -> dict:
     """Build per-time-bucket aggregate dicts from sessions."""
-    from .stats import _price_for, _token_cost
-
     buckets = defaultdict(lambda: {
         "tokens": 0, "sessions": set(), "messages": 0,
         "models": defaultdict(int), "cost": 0.0,

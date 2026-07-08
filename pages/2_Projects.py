@@ -42,7 +42,7 @@ st.caption(
 # ── Project metrics (cached) ─────────────────────────────────────────────────
 
 @st.cache_data(ttl=86400, show_spinner="Building project metrics...")
-def _build_project_df(_sessions, _projects_most_common, _project_tokens, _project_size):
+def _build_project_df(_sessions, _projects_most_common, _project_tokens, _project_size) -> pd.DataFrame:
     """Build enriched project dataframe."""
     projects = _projects_most_common
 

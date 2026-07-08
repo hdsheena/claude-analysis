@@ -90,7 +90,7 @@ def _read_file_head(path: str, lines: int = 8) -> str:
     try:
         with open(path) as f:
             return "".join(f.readline() for _ in range(lines))
-    except Exception:
+    except (OSError, UnicodeDecodeError):
         return "(unreadable)"
 
 
@@ -191,7 +191,7 @@ def analyze_plugins() -> str:
                             lines.append(f"    • {str(name)[:70]}")
                 elif isinstance(data, dict):
                     lines.append(f"  {cfg}: {len(data)} keys")
-            except Exception:
+            except (OSError, json.JSONDecodeError):
                 lines.append(f"  {cfg}: (parse error)")
 
     # Marketplaces
@@ -228,7 +228,7 @@ def analyze_plugins() -> str:
                 name = d.get("name", "?")
                 version = d.get("version", "?")
                 lines.append(f"    {name} v{version} ({rel})")
-            except Exception:
+            except (OSError, json.JSONDecodeError):
                 lines.append(f"    {rel}")
 
     return "\n".join(lines)

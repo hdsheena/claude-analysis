@@ -8,7 +8,7 @@ import threading
 import streamlit as st
 
 from claude_analyzer.parser import parse_sessions, parse_sessions_parallel, enrich_sessions
-from claude_analyzer.stats import compute_stats
+from claude_analyzer.stats import AggStats, compute_stats
 from claude_analyzer.disk_cache import cache_get, cache_set, cache_info, cache_clear
 
 
@@ -68,7 +68,7 @@ _SIDEBAR_CSS = """
 # ═══════════════════════════════════════════════════════════════════════════════
 
 @st.cache_data(ttl=86400, show_spinner="Loading sessions...")
-def load_sessions(source: str = "all"):
+def load_sessions(source: str = "all") -> list:
     """Load and enrich all sessions (disk + memory cached).
 
     Caches per-source in SQLite so switching sources is instant.
@@ -124,7 +124,7 @@ def load_sessions(source: str = "all"):
 
 
 @st.cache_data(ttl=86400, show_spinner="Computing statistics...")
-def get_stats(_sessions):
+def get_stats(_sessions) -> AggStats:
     """Compute aggregate stats from sessions (cached)."""
     return compute_stats(_sessions)
 
@@ -133,14 +133,14 @@ def get_stats(_sessions):
 # Filters
 # ═══════════════════════════════════════════════════════════════════════════════
 
-def filter_sessions(sessions, project_filter: str = ""):
+def filter_sessions(sessions, project_filter: str = "") -> list:
     """Filter sessions by project name substring."""
     if not project_filter:
         return sessions
     return [s for s in sessions if project_filter.lower() in s.project.lower()]
 
 
-def filter_by_time(sessions, time_range: str = "All time"):
+def filter_by_time(sessions, time_range: str = "All time") -> list:
     """Filter sessions by a time range.
 
     Sessions without a started_at timestamp are always included.
@@ -163,14 +163,14 @@ def filter_by_time(sessions, time_range: str = "All time"):
     return filtered
 
 
-def apply_all_filters(sessions, project_filter: str = "", time_range: str = "All time"):
+def apply_all_filters(sessions, project_filter: str = "", time_range: str = "All time") -> list:
     """Apply both project and time filters in one pass."""
     sessions = filter_by_time(sessions, time_range)
     sessions = filter_sessions(sessions, project_filter)
     return sessions
 
 
-def get_time_range_index():
+def get_time_range_index() -> int:
     """Get the index for a time_range selectbox, synced from session_state."""
     key = st.session_state.get("time_range", "All time")
     keys = list(TIME_RANGES.keys())
@@ -181,7 +181,7 @@ def get_time_range_index():
 # Cache prewarming
 # ═══════════════════════════════════════════════════════════════════════════════
 
-def _prewarm_cache_sync():
+def _prewarm_cache_sync() -> None:
     """Parse and cache all missing sources synchronously.
 
     Called after cache_clear() so the next page load after refresh
@@ -208,7 +208,7 @@ def _prewarm_cache_sync():
         pass
 
 
-def _prewarm_caches_async():
+def _prewarm_caches_async() -> None:
     """Parse and cache all sources in a background thread."""
     t = threading.Thread(target=_prewarm_cache_sync, daemon=True)
     t.start()
@@ -218,7 +218,7 @@ def _prewarm_caches_async():
 # Sidebar
 # ═══════════════════════════════════════════════════════════════════════════════
 
-def _render_nav_links():
+def _render_nav_links() -> None:
     """Render page navigation links in the sidebar."""
     st.divider()
     st.caption("📊 PAGES")
@@ -231,7 +231,7 @@ def _render_nav_links():
     st.page_link("pages/6_Antigravity.py", label="🧠 Antigravity", icon="💭")
 
 
-def _render_cache_status():
+def _render_cache_status() -> None:
     """Show disk cache age and size in sidebar."""
     ci = cache_info()
     if ci["count"] == 0:
@@ -252,7 +252,7 @@ def _render_cache_status():
     )
 
 
-def render_sidebar():
+def render_sidebar() -> tuple:
     """Render the shared sidebar with filters, nav, cache status, and refresh.
 
     Must be called once per page. Returns (source, project_filter, time_range).

@@ -23,7 +23,7 @@ from claude_analyzer.search import build_tool_index, search_tool_calls, get_conv
 # Render helpers
 # ═══════════════════════════════════════════════════════════════════════════════
 
-def _render_tool_search(sessions):
+def _render_tool_search(sessions) -> None:
     """Expandable tool-call search with conversation context on click."""
     @st.cache_data(ttl=86400, show_spinner="Indexing tool calls...")
     def _build_search_index(_sessions):
@@ -98,7 +98,7 @@ def _render_tool_search(sessions):
     st.divider()
 
 
-def _render_session_detail(sess):
+def _render_session_detail(sess) -> None:
     """Drill-down view for a single session: metrics, models/tools, chat/raw/jsonl tabs."""
     st.divider()
     st.subheader(f"📌 Session Detail: {sess.session_id[:16]}...")
@@ -218,7 +218,7 @@ def _extract_text_from_freebuff_blocks(blocks) -> str:
     return "\n".join(texts)
 
 
-def _render_chat_view(sess):
+def _render_chat_view(sess) -> None:
     """Render session messages in a chat-like UI."""
     max_show = 200
     st.caption(f"Showing {min(max_show, len(sess.messages))} of {len(sess.messages)} messages")

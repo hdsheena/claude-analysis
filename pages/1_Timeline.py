@@ -25,7 +25,7 @@ SOURCE_COLORS = {
 # Chart render helpers
 # ═══════════════════════════════════════════════════════════════════════════════
 
-def _render_token_chart(df, tl):
+def _render_token_chart(df, tl) -> None:
     """Stacked area by source (multi-source) or simple line chart (single)."""
     st.subheader("📊 Token Usage Over Time")
     tokens_by_src = tl.get("tokens_by_source", {})
@@ -63,7 +63,7 @@ def _render_token_chart(df, tl):
     st.plotly_chart(fig, use_container_width=True)
 
 
-def _render_sessions_cost_charts(df):
+def _render_sessions_cost_charts(df) -> None:
     """Two side-by-side charts: sessions per period and cost over time."""
     col1, col2 = st.columns(2)
     with col1:
@@ -85,7 +85,7 @@ def _render_sessions_cost_charts(df):
         st.plotly_chart(fig, use_container_width=True)
 
 
-def _render_sessions_only_chart(df):
+def _render_sessions_only_chart(df) -> None:
     """Full-width sessions chart when no token data (Freebuff/Antigravity)."""
     st.subheader("🔢 Sessions per Period")
     fig = px.bar(df, x="Date", y="Sessions", color_discrete_sequence=["#00cc96"])
@@ -94,7 +94,7 @@ def _render_sessions_only_chart(df):
     st.plotly_chart(fig, use_container_width=True)
 
 
-def _render_model_trends(df, tl):
+def _render_model_trends(df, tl) -> None:
     """Stacked area chart of model usage over time."""
     if not tl.get("top_models"):
         return
@@ -117,7 +117,7 @@ def _render_model_trends(df, tl):
     st.plotly_chart(fig, use_container_width=True)
 
 
-def _render_cache_charts(tl):
+def _render_cache_charts(tl) -> None:
     """Cache read/write volume and hit rate charts."""
     cache_read = tl.get("cache_read", [])
     cache_write = tl.get("cache_write", [])
@@ -161,7 +161,7 @@ def _render_cache_charts(tl):
         st.plotly_chart(fig, use_container_width=True)
 
 
-def _render_raw_data_table(df, tl):
+def _render_raw_data_table(df, tl) -> None:
     """Raw timeline data with per-source token columns."""
     st.divider()
     st.subheader("📋 Raw Timeline Data")
@@ -179,7 +179,7 @@ def _render_raw_data_table(df, tl):
     )
 
 
-def _render_model_breakdown(tl):
+def _render_model_breakdown(tl) -> None:
     """Separate table breaking down model usage per period."""
     if not tl.get("top_models"):
         return

@@ -12,6 +12,7 @@ import glob
 from collections import defaultdict
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from dataclasses import dataclass, field
+from datetime import datetime
 from typing import Optional
 
 # --- Configurable paths ---
@@ -136,7 +137,6 @@ def _parse_iso_to_epoch(ts_str: str) -> Optional[int]:
     if not ts_str:
         return None
     try:
-        from datetime import datetime
         dt = datetime.fromisoformat(ts_str.replace("Z", "+00:00"))
         return int(dt.timestamp())
     except (ValueError, TypeError):
@@ -273,7 +273,7 @@ def parse_sessions(source: str = "all") -> list:
                                 else:
                                     text = str(content)[:200]
                                 sess.first_user_msg = text[:300]
-                            except Exception:
+                            except (AttributeError, TypeError, ValueError):
                                 pass
 
             sessions.append(sess)

@@ -18,7 +18,7 @@ CACHE_PATH = os.path.join(CACHE_DIR, "sessions.db")
 CACHE_TTL = 86400  # 24 hours
 
 
-def _ensure_cache():
+def _ensure_cache() -> None:
     os.makedirs(CACHE_DIR, exist_ok=True)
 
     # Clean up old pickle files from previous cache format
@@ -124,7 +124,7 @@ def cache_get(key: str):
         return None
 
 
-def cache_set(key: str, data):
+def cache_set(key: str, data) -> None:
     """Write data to the cache (gzip-compressed pickle)."""
     _ensure_cache()
 
@@ -145,7 +145,7 @@ def cache_set(key: str, data):
         pass
 
 
-def cache_clear():
+def cache_clear() -> None:
     """Remove all rows from the cache table and delete old pickle files."""
     _ensure_cache()
 

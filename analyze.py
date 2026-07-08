@@ -38,7 +38,7 @@ from claude_analyzer.viz import summary, project_detail, session_list
 # Output helpers
 # ═══════════════════════════════════════════════════════════════════════════════
 
-def _run_special_reports(args):
+def _run_special_reports(args) -> bool:
     """Handle --memory, --skills, --plugins flags that don't need sessions."""
     ran = False
     if args.memory:
@@ -61,7 +61,7 @@ def _run_special_reports(args):
     return ran
 
 
-def _run_search_modes(args, sessions):
+def _run_search_modes(args, sessions) -> bool:
     """Handle --search-tool, --search-card, --card-context."""
     from claude_analyzer.search import (
         build_tool_index, search_tool_calls, search_report,
@@ -95,7 +95,7 @@ def _run_search_modes(args, sessions):
     return False
 
 
-def _run_diff_mode(args, sessions):
+def _run_diff_mode(args, sessions) -> bool:
     """Handle --diff flag for comparing sessions or projects."""
     if args.diff is None or len(args.diff) < 2:
         return False
@@ -113,7 +113,7 @@ def _run_diff_mode(args, sessions):
     return True
 
 
-def _run_timeline_mode(args, sessions):
+def _run_timeline_mode(args, sessions) -> bool:
     """Handle --timeline flag for sparkline output."""
     if args.timeline is None:
         return False
@@ -122,7 +122,7 @@ def _run_timeline_mode(args, sessions):
     return True
 
 
-def _output_json(stats):
+def _output_json(stats) -> None:
     """Output stats as JSON."""
     output = {
         "total_sessions": stats.total_sessions,
@@ -163,7 +163,7 @@ def _output_json(stats):
     print(json.dumps(output, indent=2))
 
 
-def _output_text_reports(args, stats, sessions):
+def _output_text_reports(args, stats, sessions) -> None:
     """Output text-based reports for summary, projects, models, tools, sessions."""
     if args.all or (not any([args.projects, args.models, args.tools,
                              args.sessions is not None])):
@@ -193,7 +193,7 @@ def _output_text_reports(args, stats, sessions):
 # Argument parser
 # ═══════════════════════════════════════════════════════════════════════════════
 
-def _build_parser():
+def _build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(
         description="Analyze Claude Code session history",
         formatter_class=argparse.RawDescriptionHelpFormatter,
@@ -228,7 +228,7 @@ def _build_parser():
 # Main
 # ═══════════════════════════════════════════════════════════════════════════════
 
-def main():
+def main() -> None:
     parser = _build_parser()
     args = parser.parse_args()
 

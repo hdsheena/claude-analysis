@@ -30,6 +30,20 @@ def abbreviate_guids(obj, max_len: int = 8):
     Hex strings longer than max_len get truncated to prefix...
     e.g. '67e57b7ec17def66f7dfef16' -> '67e57b7e...'
     """
+    return _abbreviate_guids(obj, max_len)
+
+
+def _abbreviate_guids(obj, max_len: int = 8):
+    """Recursive helper for abbreviate_guids."""
+    if isinstance(obj, dict):
+        return {k: _abbreviate_guids(v, max_len) for k, v in obj.items()}
+    if isinstance(obj, list):
+        return [_abbreviate_guids(item, max_len) for item in obj]
+    if isinstance(obj, str):
+        if re.fullmatch(r"[0-9a-fA-F-]{" + str(max_len + 1) + r",}", obj):
+            return obj[:max_len] + "..."
+        return obj
+    return obj
     if isinstance(obj, dict):
         return {k: abbreviate_guids(v, max_len) for k, v in obj.items()}
     if isinstance(obj, list):

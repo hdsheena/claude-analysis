@@ -17,7 +17,7 @@ from claude_analyzer.stats import format_tokens, format_number
 from claude_analyzer.diff import _session_stats, _aggregate_stats
 
 
-def _render_model_chart(models: dict, title: str, color: str):
+def _render_model_chart(models: dict, title: str, color: str) -> None:
     """Render a horizontal bar chart of model usage."""
     st.subheader(f"🤖 {title}")
     if models:

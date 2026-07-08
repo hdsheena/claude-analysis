@@ -18,7 +18,7 @@ from claude_analyzer.stats import format_number, format_tokens
 # Chart render helpers
 # ═══════════════════════════════════════════════════════════════════════════════
 
-def _render_model_chart(stats, source):
+def _render_model_chart(stats, source) -> None:
     st.subheader(f"📊 Model Usage ({source.upper()})")
     model_items = stats.model_counts.most_common(15)
     df_models = pd.DataFrame([{
@@ -36,7 +36,7 @@ def _render_model_chart(stats, source):
         st.plotly_chart(fig, use_container_width=True)
 
 
-def _render_tools_chart(stats, source):
+def _render_tools_chart(stats, source) -> None:
     st.subheader(f"🛠️ Top Tools Used ({source.upper()})")
     tool_items = stats.tool_counts.most_common(20)
     if tool_items:
@@ -49,7 +49,7 @@ def _render_tools_chart(stats, source):
         st.plotly_chart(fig, use_container_width=True)
 
 
-def _render_cost_chart(stats, source):
+def _render_cost_chart(stats, source) -> None:
     st.subheader(f"💰 Estimated Cost by Model ({source.upper()})")
     if not stats.model_costs:
         st.caption("No cost data available.")
@@ -66,7 +66,7 @@ def _render_cost_chart(stats, source):
     st.plotly_chart(fig, use_container_width=True)
 
 
-def _render_project_chart(stats, source):
+def _render_project_chart(stats, source) -> None:
     st.subheader(f"📁 Projects by Session Count ({source.upper()})")
     proj_items = stats.projects.most_common(15)
     if not proj_items:
@@ -83,7 +83,7 @@ def _render_project_chart(stats, source):
     st.plotly_chart(fig, use_container_width=True)
 
 
-def _render_length_distribution(stats):
+def _render_length_distribution(stats) -> None:
     st.subheader("📏 Session Length Distribution")
     lengths = sorted(stats.session_lengths)
     if not lengths:
@@ -97,7 +97,7 @@ def _render_length_distribution(stats):
     st.plotly_chart(fig, use_container_width=True)
 
 
-def _render_stop_reasons(stats):
+def _render_stop_reasons(stats) -> None:
     st.subheader("🛑 Stop Reasons")
     stop_items = stats.stop_reasons.most_common(10)
     if not stop_items:
@@ -109,7 +109,7 @@ def _render_stop_reasons(stats):
     st.plotly_chart(fig, use_container_width=True)
 
 
-def _render_footer():
+def _render_footer() -> None:
     st.caption(f"Last parsed: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')} • "
                "Use the sidebar to navigate between views or refresh data.")
 

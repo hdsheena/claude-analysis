@@ -5,7 +5,7 @@ from collections import Counter, defaultdict
 from dataclasses import dataclass, field
 from typing import Optional
 
-from .parser import Session, Message
+from .parser import Session
 
 # Approximate pricing per 1M tokens (USD), as of mid-2026
 # These are rough estimates; actual costs depend on plan/tier
@@ -117,7 +117,10 @@ class AggStats:
     project_models: dict = field(default_factory=dict)
 
 
-def _compute_model_costs(model_tokens_in, model_tokens_out, model_cache_read, model_cache_write):
+def _compute_model_costs(
+    model_tokens_in: dict, model_tokens_out: dict,
+    model_cache_read: dict, model_cache_write: dict,
+) -> dict:
     """Compute estimated cost per model from token counts."""
     model_cost_map = {}
     for model in set(list(model_tokens_in.keys()) + list(model_tokens_out.keys())):
@@ -209,7 +212,7 @@ def compute_stats(sessions: list) -> AggStats:
     return stats
 
 
-def aggregate_message_stats(messages: list) -> dict:
+def aggregate_message_stats(messages: list[Message]) -> dict:
     """Extract model, tool, token, and stop-reason stats from a message list.
 
     Returns a dict with:
@@ -219,8 +222,6 @@ def aggregate_message_stats(messages: list) -> dict:
     Shared entry point used by both stats.py and diff.py to avoid duplicating
     the message-aggregation loop.
     """
-    from collections import Counter
-
     models = Counter()
     tools = Counter()
     stop_reasons = Counter()
