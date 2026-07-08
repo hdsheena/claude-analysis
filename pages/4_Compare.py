@@ -11,11 +11,28 @@ st.set_page_config(
 
 import pandas as pd
 import plotly.express as px
-import plotly.graph_objects as go
 
 from shared import load_sessions, apply_all_filters, render_sidebar
 from claude_analyzer.stats import format_tokens, format_number
 from claude_analyzer.diff import _session_stats, _aggregate_stats
+
+
+def _render_model_chart(models: dict, title: str, color: str):
+    """Render a horizontal bar chart of model usage."""
+    st.subheader(f"🤖 {title}")
+    if models:
+        df = pd.DataFrame(
+            [{"Model": m.replace("claude-", ""), "Calls": c}
+             for m, c in models.items()]
+        )
+        fig = px.bar(df, x="Calls", y="Model", orientation="h",
+                     color_discrete_sequence=[color])
+        fig.update_layout(
+            height=300, margin=dict(l=0, r=0, t=0, b=0),
+            paper_bgcolor="rgba(0,0,0,0)", plot_bgcolor="rgba(0,0,0,0)",
+            yaxis=dict(autorange="reversed"),
+        )
+        st.plotly_chart(fig, use_container_width=True)
 
 
 st.title("⚖️ Compare Sessions or Projects")
@@ -131,54 +148,10 @@ if mode == "Sessions":
     col1, col2 = st.columns(2)
 
     with col1:
-        st.subheader("🤖 Models (A)")
-        if a["models"]:
-            df_a_models = pd.DataFrame(
-                [
-                    {"Model": m.replace("claude-", ""), "Calls": c}
-                    for m, c in a["models"].items()
-                ]
-            )
-            fig = px.bar(
-                df_a_models,
-                x="Calls",
-                y="Model",
-                orientation="h",
-                color_discrete_sequence=["#636efa"],
-            )
-            fig.update_layout(
-                height=300,
-                margin=dict(l=0, r=0, t=0, b=0),
-                paper_bgcolor="rgba(0,0,0,0)",
-                plot_bgcolor="rgba(0,0,0,0)",
-                yaxis=dict(autorange="reversed"),
-            )
-            st.plotly_chart(fig, use_container_width=True)
+        _render_model_chart(a["models"], "Models (A)", "#636efa")
 
     with col2:
-        st.subheader("🤖 Models (B)")
-        if b["models"]:
-            df_b_models = pd.DataFrame(
-                [
-                    {"Model": m.replace("claude-", ""), "Calls": c}
-                    for m, c in b["models"].items()
-                ]
-            )
-            fig = px.bar(
-                df_b_models,
-                x="Calls",
-                y="Model",
-                orientation="h",
-                color_discrete_sequence=["#00cc96"],
-            )
-            fig.update_layout(
-                height=300,
-                margin=dict(l=0, r=0, t=0, b=0),
-                paper_bgcolor="rgba(0,0,0,0)",
-                plot_bgcolor="rgba(0,0,0,0)",
-                yaxis=dict(autorange="reversed"),
-            )
-            st.plotly_chart(fig, use_container_width=True)
+        _render_model_chart(b["models"], "Models (B)", "#00cc96")
 
 else:
     # ── Project comparison mode ──────────────────────────────────────────────
@@ -249,51 +222,7 @@ else:
     col1, col2 = st.columns(2)
 
     with col1:
-        st.subheader(f"🤖 Models: {proj_a}")
-        if a["models"]:
-            df_am = pd.DataFrame(
-                [
-                    {"Model": m.replace("claude-", ""), "Calls": c}
-                    for m, c in a["models"].items()
-                ]
-            )
-            fig = px.bar(
-                df_am,
-                x="Calls",
-                y="Model",
-                orientation="h",
-                color_discrete_sequence=["#636efa"],
-            )
-            fig.update_layout(
-                height=300,
-                margin=dict(l=0, r=0, t=0, b=0),
-                paper_bgcolor="rgba(0,0,0,0)",
-                plot_bgcolor="rgba(0,0,0,0)",
-                yaxis=dict(autorange="reversed"),
-            )
-            st.plotly_chart(fig, use_container_width=True)
+        _render_model_chart(a["models"], f"Models: {proj_a}", "#636efa")
 
     with col2:
-        st.subheader(f"🤖 Models: {proj_b}")
-        if b["models"]:
-            df_bm = pd.DataFrame(
-                [
-                    {"Model": m.replace("claude-", ""), "Calls": c}
-                    for m, c in b["models"].items()
-                ]
-            )
-            fig = px.bar(
-                df_bm,
-                x="Calls",
-                y="Model",
-                orientation="h",
-                color_discrete_sequence=["#00cc96"],
-            )
-            fig.update_layout(
-                height=300,
-                margin=dict(l=0, r=0, t=0, b=0),
-                paper_bgcolor="rgba(0,0,0,0)",
-                plot_bgcolor="rgba(0,0,0,0)",
-                yaxis=dict(autorange="reversed"),
-            )
-            st.plotly_chart(fig, use_container_width=True)
+        _render_model_chart(b["models"], f"Models: {proj_b}", "#00cc96")

@@ -181,34 +181,36 @@ def get_time_range_index():
 # Cache prewarming
 # ═══════════════════════════════════════════════════════════════════════════════
 
-def _prewarm_caches_async():
-    """Parse and cache all sources in a background thread.
+def _prewarm_cache_sync():
+    """Parse and cache all missing sources synchronously.
 
     Called after cache_clear() so the next page load after refresh
     gets cache HITs instead of waiting for a full re-parse.
     """
-    def _prewarm():
-        try:
-            missing = [src for src in ALL_SOURCES if cache_get(f"sessions_{src}") is None]
-            if not missing:
-                return
-            all_parsed = []
-            for src in missing:
-                s = parse_sessions(source=src)
-                enrich_sessions(s)
-                all_parsed.extend(s)
-            by_source = {s: [] for s in ALL_SOURCES}
-            for s in all_parsed:
-                key = _SOURCE_TO_CACHE_KEY.get(s.source)
-                if key:
-                    by_source[key].append(s)
-            for src in ALL_SOURCES:
-                if cache_get(f"sessions_{src}") is None:
-                    cache_set(f"sessions_{src}", by_source[src])
-        except Exception:
-            pass
+    try:
+        missing = [src for src in ALL_SOURCES if cache_get(f"sessions_{src}") is None]
+        if not missing:
+            return
+        all_parsed = []
+        for src in missing:
+            s = parse_sessions(source=src)
+            enrich_sessions(s)
+            all_parsed.extend(s)
+        by_source = {s: [] for s in ALL_SOURCES}
+        for s in all_parsed:
+            key = _SOURCE_TO_CACHE_KEY.get(s.source)
+            if key:
+                by_source[key].append(s)
+        for src in ALL_SOURCES:
+            if cache_get(f"sessions_{src}") is None:
+                cache_set(f"sessions_{src}", by_source[src])
+    except Exception:
+        pass
 
-    t = threading.Thread(target=_prewarm, daemon=True)
+
+def _prewarm_caches_async():
+    """Parse and cache all sources in a background thread."""
+    t = threading.Thread(target=_prewarm_cache_sync, daemon=True)
     t.start()
 
 

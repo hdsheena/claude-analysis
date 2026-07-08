@@ -12,6 +12,7 @@ st.set_page_config(
 import os
 import glob
 import json
+import sqlite3
 import pandas as pd
 import plotly.express as px
 from collections import defaultdict
@@ -24,6 +25,34 @@ from shared import render_sidebar
 # ═══════════════════════════════════════════════════════════════════════════════
 # Tab render functions
 # ═══════════════════════════════════════════════════════════════════════════════
+
+@st.cache_data(ttl=86400, show_spinner="Counting sessions...")
+def _count_sessions_by_source():
+    """Count session files across all data sources."""
+    counts = {}
+    for d in [os.path.expanduser("~/.claude/projects"),
+              os.path.expanduser("~/Library/Application Support/Claude/local-agent-mode-sessions")]:
+        if os.path.isdir(d):
+            key = "projects" if "projects" in d else "local-agent"
+            counts[key] = len(glob.glob(os.path.join(d, "**", "*.jsonl"), recursive=True))
+    fb = os.path.expanduser("~/.config/manicode/projects")
+    if os.path.isdir(fb):
+        counts["freebuff"] = len(glob.glob(os.path.join(fb, "*", "chats", "*", "chat-messages.json")))
+    for db_path, key in [(os.path.expanduser("~/.local/share/mimocode/mimocode.db"), "mimo"),
+                         (os.path.expanduser("~/.local/share/opencode/opencode.db"), "opencode")]:
+        if os.path.isfile(db_path):
+            try:
+                conn = sqlite3.connect(db_path)
+                row = conn.execute("SELECT COUNT(*) FROM session").fetchone()
+                counts[key] = row[0] if row else 0
+                conn.close()
+            except Exception:
+                counts[key] = "?"
+    brain_dir = os.path.expanduser("~/.gemini/antigravity/brain")
+    if os.path.isdir(brain_dir):
+        counts["antigravity"] = len(glob.glob(os.path.join(brain_dir, "*", ".system_generated", "logs", "transcript.jsonl")))
+    return counts
+
 
 def _render_memory_tab():
     """Scan and display memory files across projects."""
@@ -304,33 +333,6 @@ def _render_data_sources_tab():
 
     st.divider()
 
-    @st.cache_data(ttl=86400, show_spinner="Counting sessions...")
-    def _count_sessions_by_source():
-        counts = {}
-        for d in [os.path.expanduser("~/.claude/projects"),
-                  os.path.expanduser("~/Library/Application Support/Claude/local-agent-mode-sessions")]:
-            if os.path.isdir(d):
-                key = "projects" if "projects" in d else "local-agent"
-                counts[key] = len(glob.glob(os.path.join(d, "**", "*.jsonl"), recursive=True))
-        fb = os.path.expanduser("~/.config/manicode/projects")
-        if os.path.isdir(fb):
-            counts["freebuff"] = len(glob.glob(os.path.join(fb, "*", "chats", "*", "chat-messages.json")))
-        import sqlite3
-        for db_path, key in [(os.path.expanduser("~/.local/share/mimocode/mimocode.db"), "mimo"),
-                             (os.path.expanduser("~/.local/share/opencode/opencode.db"), "opencode")]:
-            if os.path.isfile(db_path):
-                try:
-                    conn = sqlite3.connect(db_path)
-                    row = conn.execute("SELECT COUNT(*) FROM session").fetchone()
-                    counts[key] = row[0] if row else 0
-                    conn.close()
-                except Exception:
-                    counts[key] = "?"
-        brain_dir = os.path.expanduser("~/.gemini/antigravity/brain")
-        if os.path.isdir(brain_dir):
-            counts["antigravity"] = len(glob.glob(os.path.join(brain_dir, "*", ".system_generated", "logs", "transcript.jsonl")))
-        return counts
-
     try:
         counts = _count_sessions_by_source()
         cols = st.columns(5)
@@ -345,11 +347,7 @@ def _render_data_sources_tab():
         st.caption("(Could not count sessions)")
 
 
-# categorize_repo_files and scan_repo_tool_dirs are now in claude_analyzer.skills
 
-
-
-# categorize_repo_files and scan_repo_tool_dirs are in claude_analyzer.skills
 
 
 def _display_repo_files(tool_contents: dict, repo_dirs: list):
