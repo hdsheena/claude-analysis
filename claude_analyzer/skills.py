@@ -3,6 +3,7 @@
 import os
 import glob
 import json
+import sqlite3
 from collections import defaultdict
 
 SKILLS_DIR = os.path.expanduser("~/.claude/skills")
@@ -22,27 +23,64 @@ TOOL_CONFIG_DIRS = {
 }
 
 
-def scan_repo_tool_dirs() -> dict:
-    """Scan GitHub repos for per-project tool configuration directories.
+def _opencode_repo_dirs() -> list:
+    """Get unique workspace/repo directories from OpenCode SQLite DB."""
+    db_path = os.path.expanduser("~/.local/share/opencode/opencode.db")
+    if not os.path.isfile(db_path):
+        return []
+    try:
+        conn = sqlite3.connect(db_path)
+        rows = conn.execute(
+            "SELECT DISTINCT directory FROM session WHERE directory IS NOT NULL AND directory != ''"
+        ).fetchall()
+        conn.close()
+        return sorted(set(r[0] for r in rows))
+    except sqlite3.Error:
+        return []
 
-    Returns dict keyed by directory name (e.g. ".claude") with a list of
-    paths to each repo's config directory.
+
+def _antigravity_repo_dirs() -> list:
+    """Get project directories from Antigravity brain."""
+    brain_dir = os.path.expanduser("~/.gemini/antigravity/brain")
+    if not os.path.isdir(brain_dir):
+        return []
+    return [os.path.join(brain_dir, d) for d in sorted(os.listdir(brain_dir))
+            if os.path.isdir(os.path.join(brain_dir, d))]
+
+
+def scan_repo_tool_dirs() -> dict:
+    """Scan for repos associated with each tool.
+
+    For tools with per-repo config dirs (.claude, .mimocode, .commandcode):
+    scans GitHub repos for those directories.
+
+    For tools without config dirs (.opencode, .antigravity): queries their
+    data stores for repo/workspace directories that have session data.
+
+    Returns dict keyed by directory/source name with a list of paths.
     """
     repo_roots = [
         os.path.expanduser("~/GitHub"),
         os.path.expanduser("~/Documents/GitHub"),
         os.path.expanduser("~/orca/workspaces"),
     ]
-    result = {name: [] for name in TOOL_CONFIG_DIRS}
-    for root in repo_roots:
-        if not os.path.isdir(root):
-            continue
-        depth = 2 if "orca" in root else 1
-        for tool_dir_name in TOOL_CONFIG_DIRS:
+    result = {}
+
+    # Tools with per-repo config directories
+    for tool_dir_name in [".claude", ".mimocode", ".commandcode"]:
+        dirs = []
+        for root in repo_roots:
+            if not os.path.isdir(root):
+                continue
+            depth = 2 if "orca" in root else 1
             pattern = os.path.join(root, *(["*"] * depth), tool_dir_name)
-            result[tool_dir_name].extend(glob.glob(pattern))
-    for name in result:
-        result[name] = sorted(set(result[name]))
+            dirs.extend(glob.glob(pattern))
+        result[tool_dir_name] = sorted(set(dirs))
+
+    # Tools backed by data stores (no per-repo config dirs)
+    result[".opencode"] = _opencode_repo_dirs()
+    result[".antigravity"] = _antigravity_repo_dirs()
+
     return result
 
 

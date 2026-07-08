@@ -13,6 +13,7 @@ TOOL_DISPLAY = {
     ".mimocode": {"emoji": "🤖", "label": "Mimo"},
     ".commandcode": {"emoji": "⌨️", "label": "CommandCode"},
     ".opencode": {"emoji": "🔓", "label": "OpenCode"},
+    ".antigravity": {"emoji": "🧠", "label": "Antigravity"},
 }
 
 
@@ -70,10 +71,23 @@ def _display_repo_files(tool_contents: dict, repo_dirs: list) -> None:
                 )
 
 
+def _render_simple_repo_list(repo_dirs: list) -> None:
+    """Render a simple list of repo directories (no file categorization)."""
+    rows = []
+    for d in repo_dirs:
+        repo_name = os.path.basename(d) if os.path.isdir(d) else os.path.basename(os.path.dirname(d))
+        rows.append({"Repo": repo_name, "Path": d})
+    st.dataframe(pd.DataFrame(rows), use_container_width=True, hide_index=True,
+                 column_config={
+                     "Repo": st.column_config.TextColumn("Repo", width="medium"),
+                     "Path": st.column_config.TextColumn("Path", width="large"),
+                 })
+
+
 def render() -> None:
-    """Scan repos for .claude, .mimocode, .opencode, .commandcode configs."""
+    """Scan repos for per-project tool configurations."""
     st.subheader("🗂️ Repo-Level Tool Configurations")
-    st.caption("Scans repos for per-project configuration from Claude Code, Mimo, CommandCode, and OpenCode.")
+    st.caption("Shows repos that have per-project configs or session data for each tool.")
 
     @st.cache_data(ttl=86400, show_spinner="Scanning repo configs...")
     def _cached_scan():
@@ -83,25 +97,34 @@ def render() -> None:
     total_dirs = sum(len(v) for v in all_tool_dirs.values())
 
     if total_dirs == 0:
-        st.info("No repo-level tool configuration directories found.")
+        st.info("No repo-level tool configuration or session data found.")
         return
+
+    FILE_BASED_TOOLS = {".claude", ".mimocode", ".commandcode"}
 
     cols = st.columns(len(TOOL_DISPLAY))
     for i, (tool_dir_name, tool_info) in enumerate(TOOL_DISPLAY.items()):
         with cols[i]:
-            st.metric(f"{tool_info['emoji']} {tool_info['label']}", f"{len(all_tool_dirs[tool_dir_name])} repos")
+            st.metric(f"{tool_info['emoji']} {tool_info['label']}", f"{len(all_tool_dirs.get(tool_dir_name, []))} repos")
 
     st.divider()
 
     for tool_dir_name, tool_info in TOOL_DISPLAY.items():
-        dirs = all_tool_dirs[tool_dir_name]
+        dirs = all_tool_dirs.get(tool_dir_name, [])
         if not dirs:
             continue
 
-        with st.expander(f"{tool_info['emoji']} **{tool_info['label']}** — {len(dirs)} repo(s)",
+        suffix = "session(s)" if tool_dir_name == ".antigravity" else "repo(s)"
+        with st.expander(f"{tool_info['emoji']} **{tool_info['label']}** — {len(dirs)} {suffix}",
                          expanded=len(dirs) <= 4):
-            tool_contents = {}
-            for d in dirs:
-                repo_name = os.path.basename(os.path.dirname(d))
-                tool_contents[repo_name] = categorize_repo_files(d)
-            _display_repo_files(tool_contents, dirs)
+            if tool_dir_name in FILE_BASED_TOOLS:
+                tool_contents = {}
+                for d in dirs:
+                    repo_name = os.path.basename(os.path.dirname(d))
+                    tool_contents[repo_name] = categorize_repo_files(d)
+                _display_repo_files(tool_contents, dirs)
+            elif tool_dir_name == ".antigravity":
+                st.caption("Antigravity stores session data by session ID (UUID), not per-repo directories. "
+                           f"{len(dirs)} sessions found in the brain directory.")
+            else:
+                _render_simple_repo_list(dirs)
