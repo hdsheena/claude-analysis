@@ -5,7 +5,7 @@ from collections import Counter, defaultdict
 from dataclasses import dataclass, field
 from typing import Optional
 
-from .parser import Session
+from .parser import Session, Message
 
 # Approximate pricing per 1M tokens (USD), as of mid-2026
 # These are rough estimates; actual costs depend on plan/tier
