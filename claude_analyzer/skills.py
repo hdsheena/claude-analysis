@@ -59,6 +59,10 @@ def scan_repo_tool_dirs() -> dict:
 
     Returns dict keyed by directory/source name with a list of paths.
     """
+    from .disk_cache import cache_get, cache_set
+    cached = cache_get("repo_tool_dirs")
+    if cached is not None:
+        return cached
     repo_roots = [
         os.path.expanduser("~/GitHub"),
         os.path.expanduser("~/Documents/GitHub"),
@@ -81,6 +85,7 @@ def scan_repo_tool_dirs() -> dict:
     result[".opencode"] = _opencode_repo_dirs()
     result[".antigravity"] = _antigravity_repo_dirs()
 
+    cache_set("repo_tool_dirs", result)
     return result
 
 

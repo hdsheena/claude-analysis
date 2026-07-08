@@ -72,6 +72,10 @@ def collect_memory_file_data() -> list:
     This is the single source of truth for memory file scanning — both the CLI
     and Streamlit UI use this function.
     """
+    from .disk_cache import cache_get, cache_set
+    cached = cache_get("memory_file_data")
+    if cached is not None:
+        return cached
     data = []
     for fp in _find_memory_files():
         fname = os.path.basename(fp)
@@ -91,6 +95,7 @@ def collect_memory_file_data() -> list:
             "size": os.path.getsize(fp), "hash": _hash_file(fp),
             "header": _read_headers(fp),
         })
+    cache_set("memory_file_data", data)
     return data
 
 

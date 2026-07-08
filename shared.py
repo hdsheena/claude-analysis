@@ -10,6 +10,8 @@ import streamlit as st
 from claude_analyzer.parser import parse_sessions, parse_sessions_parallel, enrich_sessions
 from claude_analyzer.stats import AggStats, compute_stats
 from claude_analyzer.disk_cache import cache_get, cache_set, cache_info, cache_clear
+from claude_analyzer.skills import scan_repo_tool_dirs
+from claude_analyzer.memory import collect_memory_file_data
 
 
 TIME_RANGES = {
@@ -182,28 +184,34 @@ def get_time_range_index() -> int:
 # ═══════════════════════════════════════════════════════════════════════════════
 
 def _prewarm_cache_sync() -> None:
-    """Parse and cache all missing sources synchronously.
+    """Parse and cache all missing data synchronously.
 
     Called after cache_clear() so the next page load after refresh
     gets cache HITs instead of waiting for a full re-parse.
+    Also prewarms repo tool dirs and memory file data.
     """
     try:
         missing = [src for src in ALL_SOURCES if cache_get(f"sessions_{src}") is None]
-        if not missing:
-            return
-        all_parsed = []
-        for src in missing:
-            s = parse_sessions(source=src)
-            enrich_sessions(s)
-            all_parsed.extend(s)
-        by_source = {s: [] for s in ALL_SOURCES}
-        for s in all_parsed:
-            key = _SOURCE_TO_CACHE_KEY.get(s.source)
-            if key:
-                by_source[key].append(s)
-        for src in ALL_SOURCES:
-            if cache_get(f"sessions_{src}") is None:
-                cache_set(f"sessions_{src}", by_source[src])
+        if missing:
+            all_parsed = []
+            for src in missing:
+                s = parse_sessions(source=src)
+                enrich_sessions(s)
+                all_parsed.extend(s)
+            by_source = {s: [] for s in ALL_SOURCES}
+            for s in all_parsed:
+                key = _SOURCE_TO_CACHE_KEY.get(s.source)
+                if key:
+                    by_source[key].append(s)
+            for src in ALL_SOURCES:
+                if cache_get(f"sessions_{src}") is None:
+                    cache_set(f"sessions_{src}", by_source[src])
+
+        # Prewarm repo tool dirs and memory file data
+        if cache_get("repo_tool_dirs") is None:
+            scan_repo_tool_dirs()
+        if cache_get("memory_file_data") is None:
+            collect_memory_file_data()
     except Exception:
         pass
 
@@ -246,8 +254,8 @@ def _render_cache_status() -> None:
         else:
             age = f"{seconds // 3600}h ago"
     st.caption(
-        f"💾 Disk cache: {ci['count']} source"
-        f"{'' if ci['count'] == 1 else 's'}"
+        f"💾 Disk cache: {ci['count']} entr"
+        f"{'y' if ci['count'] == 1 else 'ies'}"
         f" ({ci['size_bytes'] / 1024:.0f} KB) · {age}"
     )
 
