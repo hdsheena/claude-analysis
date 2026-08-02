@@ -69,6 +69,8 @@ python3 analyze.py --search-tool "trello"  # Search tool calls
 | Opencode | `~/.local/share/opencode/opencode.db` | SQLite |
 | Antigravity | `~/.gemini/antigravity/brain/` | transcript.jsonl files |
 
+> **Note:** `~/.config/manicode/freebuff` is the freebuff binary executable, not a data directory. Session data lives under `~/.config/manicode/projects/`.
+
 ## Caching
 
 Session data is cached per-source in a SQLite database at `.cache/sessions.db` (gzip-compressed pickle blobs). The cache:
