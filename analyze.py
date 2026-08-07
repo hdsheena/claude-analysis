@@ -20,6 +20,7 @@ Usage:
     python3 analyze.py --memory-inventory # Full memory file listing
     python3 analyze.py --skills           # Skills analysis
     python3 analyze.py --plugins          # Plugins analysis
+    python3 analyze.py --orca-terminals   # List open Orca terminals
     python3 analyze.py --search-tool "trello_create_card"  # Search tool calls
     python3 analyze.py --search-card "Order recommendations"  # Find Trello card
     python3 analyze.py --card-context <session_id> <msg_idx>  # Show conversation
@@ -27,6 +28,7 @@ Usage:
 
 import argparse
 import json
+import signal
 import sys
 
 from claude_analyzer.parser import parse_sessions, enrich_sessions
@@ -57,6 +59,10 @@ def _run_special_reports(args) -> bool:
     if args.plugins:
         from claude_analyzer.skills import analyze_plugins
         print(analyze_plugins())
+        ran = True
+    if args.orca_terminals:
+        from claude_analyzer.orca_terminals import report, report_json
+        print(report_json() if args.json else report())
         ran = True
     return ran
 
@@ -217,6 +223,8 @@ def _build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--memory-inventory", action="store_true", help="Full memory inventory")
     parser.add_argument("--skills", action="store_true", help="Skills analysis")
     parser.add_argument("--plugins", action="store_true", help="Plugins analysis")
+    parser.add_argument("--orca-terminals", action="store_true",
+                        help="List open Orca terminals and their contents")
     parser.add_argument("--search-tool", type=str, metavar="QUERY", help="Search tool calls")
     parser.add_argument("--search-card", type=str, metavar="CARD_NAME", help="Find Trello card")
     parser.add_argument("--card-context", nargs=2, metavar=("SESSION_ID", "MSG_IDX"),
@@ -229,12 +237,22 @@ def _build_parser() -> argparse.ArgumentParser:
 # ═══════════════════════════════════════════════════════════════════════════════
 
 def main() -> None:
+    # Let a truncated downstream pipe (e.g. `| head`, `| jq`) terminate us
+    # cleanly instead of raising a BrokenPipeError at interpreter shutdown.
+    if hasattr(signal, "SIGPIPE"):
+        try:
+            signal.signal(signal.SIGPIPE, signal.SIG_DFL)
+        except (ValueError, OSError):
+            pass
     parser = _build_parser()
     args = parser.parse_args()
 
     any_special = args.memory or getattr(args, "memory_inventory", False) or \
-                  args.skills or args.plugins
+                  args.skills or args.plugins or args.orca_terminals
     ran_special = _run_special_reports(args) if any_special else False
+
+    if args.orca_terminals:
+        return
 
     any_session_flags = any([args.projects, args.models, args.tools,
                              args.sessions is not None, args.all,

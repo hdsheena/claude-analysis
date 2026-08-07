@@ -54,6 +54,7 @@ python3 analyze.py --diff a b            # Compare two sessions/projects
 python3 analyze.py --memory              # Memory file analysis
 python3 analyze.py --skills              # Installed skills analysis
 python3 analyze.py --plugins             # Plugins analysis
+python3 analyze.py --orca-terminals      # Open Orca terminals & contents
 python3 analyze.py --search-tool "trello"  # Search tool calls
 ```
 

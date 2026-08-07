@@ -27,6 +27,7 @@ dependencies = [
 
 [project.scripts]
 claude-analyze = "analyze:main"
+orca-terminals = "claude_analyzer.orca_terminals:main"
 
 [tool.setuptools.packages.find]
 include = ["claude_analyzer*"]
