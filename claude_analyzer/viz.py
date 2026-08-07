@@ -36,15 +36,23 @@ def _bar_chart(
 
 def _overview_section(stats: AggStats) -> str:
     """Build the overview section of the summary report."""
-    return f"""
-┌─ OVERVIEW ──────────────────────────────────────┐
-│ Total sessions:      {stats.total_sessions:>5}                         │
-│   from projects/:    {stats.projects_source_count:>5}                         │
-│   from local-agent:  {stats.local_agent_count:>5}                         │
-│ Total messages:      {format_number(stats.total_messages):>10}                         │
-│ Total lines:         {format_number(stats.total_lines):>10}                         │
-│ Total size on disk:  {stats.total_size_mb:>10.0f} MB                      │
-└──────────────────────────────────────────────────┘"""
+    rows = [("Total sessions", f"{stats.total_sessions}")]
+    for source, count in stats.source_counts.most_common():
+        rows.append((f"  {source}:", f"{count}"))
+    rows += [
+        ("Total messages", format_number(stats.total_messages)),
+        ("Total lines", format_number(stats.total_lines)),
+        ("Total size on disk", f"{stats.total_size_mb:.0f} MB"),
+    ]
+    label_w = max(len(label) for label, _ in rows)
+    value_w = max(len(value) for _, value in rows)
+    inner = label_w + value_w + 4
+
+    lines = [f"┌─ OVERVIEW " + "─" * (inner - 11) + "┐"]
+    for label, value in rows:
+        lines.append(f"│ {label:<{label_w}} {value:>{value_w}} │")
+    lines.append("└" + "─" * inner + "┘")
+    return "\n".join(lines)
 
 
 def _token_section(stats: AggStats) -> str:

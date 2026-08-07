@@ -18,6 +18,7 @@ from claude_analyzer.timeline import compute_timeline
 SOURCE_COLORS = {
     "claude": "#636efa", "mimo": "#00cc96", "opencode": "#ab63fa",
     "freebuff": "#ffa15a", "antigravity": "#19d3f3",
+    "copilot": "#22e584", "codex": "#4ec9b0",
 }
 
 

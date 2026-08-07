@@ -57,6 +57,8 @@ _SOURCE_MTIME_PATHS = {
     "mimo": [("~/.local/share/mimocode/mimocode.db", None)],
     "opencode": [("~/.local/share/opencode/opencode.db", None)],
     "antigravity": [("~/.gemini/antigravity/brain", "transcript.jsonl")],
+    "copilot": [("~/.copilot/session-store.db", None)],
+    "codex": [("~/.codex/state_5.sqlite", None)],
 }
 
 

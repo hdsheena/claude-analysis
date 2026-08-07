@@ -14,6 +14,9 @@ Usage:
     python3 analyze.py --all              # Everything
     python3 analyze.py --timeline         # Time-series with sparklines
     python3 analyze.py --timeline weekly  # Weekly bucketed sparklines
+    python3 analyze.py --usage            # Burn rate, pacing, projected month-end
+    python3 analyze.py --usage --json     # Same, as JSON
+    python3 analyze.py --usage --caps caps.json  # With quota caps -> days left
     python3 analyze.py --diff session_a session_b  # Compare two sessions
     python3 analyze.py --diff --project-a evc --project-b ia  # Compare projects
     python3 analyze.py --memory           # Memory file analysis
@@ -128,6 +131,19 @@ def _run_timeline_mode(args, sessions) -> bool:
     return True
 
 
+def _run_usage_mode(args, sessions) -> bool:
+    """Handle --usage flag: burn-rate, pacing, and cap projections."""
+    if not args.usage:
+        return False
+    from claude_analyzer.usage import usage_report, usage_report_json, load_caps
+    caps = load_caps(args.caps) if args.caps else load_caps()
+    if args.json:
+        print(json.dumps(usage_report_json(sessions, caps), indent=2, default=str))
+    else:
+        print(usage_report(sessions, caps))
+    return True
+
+
 def _output_json(stats) -> None:
     """Output stats as JSON."""
     output = {
@@ -205,7 +221,7 @@ def _build_parser() -> argparse.ArgumentParser:
         formatter_class=argparse.RawDescriptionHelpFormatter,
         epilog=__doc__,
     )
-    parser.add_argument("--source", choices=["all", "claude", "freebuff", "mimo", "opencode", "antigravity"],
+    parser.add_argument("--source", choices=["all", "claude", "freebuff", "mimo", "opencode", "antigravity", "copilot", "codex"],
                         default="all", help="Which session source to analyze")
     parser.add_argument("--project", type=str, help="Filter to project (substring match)")
     parser.add_argument("--projects", action="store_true", help="Per-project breakdown")
@@ -216,6 +232,11 @@ def _build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--json", action="store_true", help="JSON output")
     parser.add_argument("--timeline", nargs="?", const="daily",
                         choices=["daily", "weekly", "monthly"], help="Time-series sparklines")
+    parser.add_argument("--usage", action="store_true",
+                        help="Usage burn-rate and pacing report")
+    parser.add_argument("--caps", type=str, metavar="FILE",
+                        help="JSON file of per-source quota caps (default "
+                             "~/.config/claude-analysis/caps.json)")
     parser.add_argument("--diff", nargs="*", metavar=("A", "B"), help="Compare sessions/projects")
     parser.add_argument("--project-a", type=str, help="First project for --diff")
     parser.add_argument("--project-b", type=str, help="Second project for --diff")
@@ -256,16 +277,13 @@ def main() -> None:
 
     any_session_flags = any([args.projects, args.models, args.tools,
                              args.sessions is not None, args.all,
-                             args.timeline is not None, args.diff is not None, args.json])
+                             args.timeline is not None, args.diff is not None,
+                             args.json, args.usage])
     if ran_special and not any_session_flags:
         return
 
+    # No report flags requested → default to the full summary report.
     any_search = args.search_tool or args.search_card or args.card_context
-    needs_sessions = any_search or any_session_flags
-
-    if not needs_sessions:
-        parser.print_help()
-        return
 
     print("Parsing session data...", file=sys.stderr)
     sessions = parse_sessions(source=args.source)
@@ -284,6 +302,8 @@ def main() -> None:
     if _run_diff_mode(args, sessions) and not args.all:
         return
     if _run_timeline_mode(args, sessions) and not args.all:
+        return
+    if _run_usage_mode(args, sessions) and not args.all:
         return
 
     if args.json:

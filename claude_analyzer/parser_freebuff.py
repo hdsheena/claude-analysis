@@ -54,6 +54,7 @@ def parse_freebuff_sessions() -> list:
             project=project,
             filepath=chat_file,
             line_count=len(messages_raw),
+            size_bytes=os.path.getsize(chat_file),
         )
 
         # Parse messages

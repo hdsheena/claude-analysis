@@ -53,6 +53,7 @@ def parse_mimo_sessions() -> list:
                 source="mimo",
                 project=proj_name,
                 filepath=MIMO_DB_PATH,
+                size_bytes=0,
             )
             sess.name = srow["title"] or ""
             sess.kind = "mimo"

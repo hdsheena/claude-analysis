@@ -5,7 +5,7 @@ from collections import Counter, defaultdict
 from dataclasses import dataclass, field
 from typing import Optional
 
-from .parser import Session, Message
+from .parser import Session, Message, OPENCODE_DB_PATH, MIMO_DB_PATH, COPILOT_DB_PATH
 
 # Approximate pricing per 1M tokens (USD), as of mid-2026
 # These are rough estimates; actual costs depend on plan/tier
@@ -26,6 +26,16 @@ PRICING = {
     "mimo-v2-flash": {"input": 0.15, "output": 0.60, "cache_read": 0.0, "cache_write": 0.0},
     "mimo-v2.5-pro": {"input": 0.43, "output": 1.70, "cache_read": 0.0, "cache_write": 0.0},
     "mimo-v2.5-free": {"input": 0.0, "output": 0.0, "cache_read": 0.0, "cache_write": 0.0},
+    # GitHub Copilot / OpenAI Codex models (proxy rates; rough estimates)
+    "gpt-5-mini": {"input": 0.30, "output": 1.20, "cache_read": 0.03, "cache_write": 0.30},
+    "gpt-5.1-codex-mini": {"input": 1.25, "output": 5.0, "cache_read": 0.125, "cache_write": 1.25},
+    "gpt-5.4-mini": {"input": 1.25, "output": 5.0, "cache_read": 0.125, "cache_write": 1.25},
+    "gpt-5.1-codex-max": {"input": 2.50, "output": 10.0, "cache_read": 0.25, "cache_write": 2.50},
+    "gpt-5.2-codex": {"input": 2.50, "output": 10.0, "cache_read": 0.25, "cache_write": 2.50},
+    "gpt-5.3-codex": {"input": 2.50, "output": 10.0, "cache_read": 0.25, "cache_write": 2.50},
+    "gpt-5.4": {"input": 2.50, "output": 10.0, "cache_read": 0.25, "cache_write": 2.50},
+    "gpt-5.5": {"input": 2.50, "output": 10.0, "cache_read": 0.25, "cache_write": 2.50},
+    "gpt-5.6-luna": {"input": 2.50, "output": 10.0, "cache_read": 0.25, "cache_write": 2.50},
 }
 
 # Models known to be free — zero-cost pricing
@@ -104,6 +114,7 @@ class AggStats:
     # Source breakdown
     projects_source_count: int = 0
     local_agent_count: int = 0
+    source_counts: Counter = field(default_factory=Counter)
 
     # Model-specific token breakdown
     model_input_tokens: dict = field(default_factory=dict)
@@ -158,12 +169,13 @@ def compute_stats(sessions: list) -> AggStats:
             stats.projects_source_count += 1
         else:
             stats.local_agent_count += 1
+        stats.source_counts[sess.source] += 1
 
         stats.projects[sess.project] += 1
         project_session_map[sess.project].append(sess.session_id)
 
         try:
-            fsize = os.path.getsize(sess.filepath)
+            fsize = getattr(sess, "size_bytes", None) or 0
             stats.total_size_mb += fsize / (1024 * 1024)
             project_size_map[sess.project] += fsize
         except OSError:
@@ -204,6 +216,15 @@ def compute_stats(sessions: list) -> AggStats:
     stats.project_size = dict(project_size_map)
     stats.project_sessions = dict(project_session_map)
     stats.project_models = {k: dict(v) for k, v in project_model_map.items()}
+
+    # Each shared SQLite DB backs many sessions; count its file size only once.
+    for db_path, source in (
+        (OPENCODE_DB_PATH, "opencode"),
+        (MIMO_DB_PATH, "mimo"),
+        (COPILOT_DB_PATH, "copilot"),
+    ):
+        if os.path.isfile(db_path) and any(s.source == source for s in sessions):
+            stats.total_size_mb += os.path.getsize(db_path) / (1024 * 1024)
 
     total_context = stats.total_input_tokens + stats.total_cache_read + stats.total_cache_create
     if total_context > 0:

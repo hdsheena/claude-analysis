@@ -1,7 +1,8 @@
 """Parse session data from all supported sources.
 
 Types and helpers live here. Source-specific parsers are in separate modules:
-    parser_freebuff, parser_mimo, parser_opencode, parser_antigravity
+    parser_freebuff, parser_mimo, parser_opencode, parser_antigravity,
+    parser_copilot, parser_codex
 """
 
 import re
@@ -27,6 +28,8 @@ FREE_BUFF_PROJECTS_DIR = os.path.expanduser("~/.config/manicode/projects")
 MIMO_DB_PATH = os.path.expanduser("~/.local/share/mimocode/mimocode.db")
 OPENCODE_DB_PATH = os.path.expanduser("~/.local/share/opencode/opencode.db")
 ANTIGRAVITY_BRAIN_DIR = os.path.expanduser("~/.gemini/antigravity/brain")
+COPILOT_DB_PATH = os.path.expanduser("~/.copilot/session-store.db")
+CODEX_DB_PATH = os.path.expanduser("~/.codex/state_5.sqlite")
 
 
 @dataclass
@@ -46,9 +49,10 @@ class Message:
 class Session:
     """One session."""
     session_id: str
-    source: str  # "projects", "local-agent", "freebuff", "mimo", "opencode", "antigravity"
+    source: str  # "projects", "local-agent", "freebuff", "mimo", "opencode", "antigravity", "copilot", "codex"
     project: str
     filepath: str
+    size_bytes: Optional[int] = None
     line_count: int = 0
     messages: list = field(default_factory=list)
     first_user_msg: Optional[str] = None
@@ -208,7 +212,8 @@ def parse_sessions(source: str = "all") -> list:
     """Parse all sessions from all sources. Returns list of Session objects.
 
     Args:
-        source: "claude", "freebuff", "mimo", "opencode", "antigravity", or "all"
+        source: "claude", "freebuff", "mimo", "opencode", "antigravity",
+            "copilot", "codex", or "all"
         ("claude" merges projects + local-agent)
 
     For 'all', consider using parse_sessions_parallel() which is ~3-4x faster.
@@ -227,6 +232,10 @@ def parse_sessions(source: str = "all") -> list:
         sessions.extend(parse_opencode_sessions())
     if source in ("antigravity", "all"):
         sessions.extend(parse_antigravity_sessions())
+    if source in ("copilot", "all"):
+        sessions.extend(parse_copilot_sessions())
+    if source in ("codex", "all"):
+        sessions.extend(parse_codex_sessions())
 
     for src_label, src_dir in sources_to_parse:
         jsonl_files = _find_jsonl_files(src_dir)
@@ -239,6 +248,7 @@ def parse_sessions(source: str = "all") -> list:
                 source=src_label,
                 project=project,
                 filepath=filepath,
+                size_bytes=os.path.getsize(filepath),
             )
 
             with open(filepath, encoding="utf-8", errors="replace") as fh:
@@ -297,6 +307,8 @@ def parse_sessions_parallel(source: str = "all", max_workers: int = 5) -> list:
             "mimo": parse_mimo_sessions,
             "opencode": parse_opencode_sessions,
             "antigravity": parse_antigravity_sessions,
+            "copilot": parse_copilot_sessions,
+            "codex": parse_codex_sessions,
         }
     else:
         return parse_sessions(source)
@@ -365,3 +377,5 @@ from .parser_freebuff import parse_freebuff_sessions  # noqa: E402
 from .parser_mimo import parse_mimo_sessions  # noqa: E402
 from .parser_opencode import parse_opencode_sessions  # noqa: E402
 from .parser_antigravity import parse_antigravity_sessions  # noqa: E402
+from .parser_copilot import parse_copilot_sessions  # noqa: E402
+from .parser_codex import parse_codex_sessions  # noqa: E402

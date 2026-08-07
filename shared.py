@@ -23,12 +23,12 @@ TIME_RANGES = {
     "Last year": 365 * 24 * 3600,
 }
 
-ALL_SOURCES = ["claude", "freebuff", "mimo", "opencode", "antigravity"]
+ALL_SOURCES = ["claude", "freebuff", "mimo", "opencode", "antigravity", "copilot", "codex"]
 
 _SOURCE_TO_CACHE_KEY = {
     "projects": "claude", "local-agent": "claude",
     "freebuff": "freebuff", "mimo": "mimo", "opencode": "opencode",
-    "antigravity": "antigravity",
+    "antigravity": "antigravity", "copilot": "copilot", "codex": "codex",
 }
 
 _SIDEBAR_CSS = """
@@ -237,6 +237,7 @@ def _render_nav_links() -> None:
     st.page_link("pages/4_Compare.py", label="⚖️ Compare", icon="🔀")
     st.page_link("pages/5_Memory_Skills.py", label="📝 Memory & Skills", icon="🔧")
     st.page_link("pages/6_Antigravity.py", label="🧠 Antigravity", icon="💭")
+    st.page_link("pages/7_Usage.py", label="⚡ Usage & Pace", icon="📉")
 
 
 def _render_cache_status() -> None:
@@ -272,7 +273,7 @@ def render_sidebar() -> tuple:
 
         source = st.selectbox(
             "Session source",
-            options=["all", "claude", "freebuff", "mimo", "opencode", "antigravity"],
+            options=["all", "claude", "freebuff", "mimo", "opencode", "antigravity", "copilot", "codex"],
             index=0,
             key="sidebar_source",
             help="Filter by where sessions are stored",

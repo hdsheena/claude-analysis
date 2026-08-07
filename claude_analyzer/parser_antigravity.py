@@ -52,6 +52,7 @@ def parse_antigravity_sessions() -> list:
             source="antigravity",
             project=project,
             filepath=transcript_path,
+            size_bytes=os.path.getsize(transcript_path),
         )
 
         try:

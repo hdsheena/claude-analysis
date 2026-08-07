@@ -49,6 +49,7 @@ def parse_opencode_sessions() -> list:
                 source="opencode",
                 project=proj_name,
                 filepath=OPENCODE_DB_PATH,
+                size_bytes=0,
             )
             sess.name = srow["title"] or srow["slug"] or ""
             sess.kind = srow["agent"] or "opencode"
